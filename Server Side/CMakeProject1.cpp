@@ -1,59 +1,63 @@
 ﻿#include "CMakeProject1.h"
-//#define NOGDI             // All GDI defines and routines
-//#define NOUSER            // All USER defines and routines (Fixes CloseWindow collision)
-
 #include "enet/enet.h"
-// 3. Clean up the conflicting macros before Raylib steps in
-//#undef CloseWindow
-//#undef ShowCursor
-//#undef PlaySound
-//#include "raylib.h"
+
 using std::cout;
 using std::string;
-
-
+//network stuff begin
+#pragma pack(push, 1)
 #define MAX_PLAYERS 10
 #define MAX_PROJECTILES 100
+enum class PacketType : uint8_t {
+	ID_ASSIGNMENT = 0,
+	WORLD_STATE = 1
+};
+
 
 struct PlayerNetworkState {
-	uintptr_t id{};
-	int pos_x{};
-	int pos_y{};
-	int health{};
+	uint16_t pos_x{};
+	uint16_t pos_y{};
+	uint16_t health{};
+	uint8_t id{};
 	bool active{};
 };
 struct projectile_network {
-	int pos_x{};
-	int pos_y{};
-	int radius{};
+	uint16_t pos_x{};
+	uint16_t pos_y{};
+	uint16_t radius{};
+	uint16_t id{};
 };
-
-// This is the full package sent over the network
 struct WorldStatePacket {
-	int projectile_count{};
-	int active_player_count{};
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::WORLD_STATE); 
+	uint8_t active_player_count{};
+	uint8_t projectile_count{};
 	PlayerNetworkState players[MAX_PLAYERS];
 	projectile_network projectiles[MAX_PROJECTILES];
+
 };
+struct id_assign {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::ID_ASSIGNMENT); 
+	uint8_t id;
+};
+#pragma pack(pop)
+
+//network stuff end
+
 struct map {
 	int height{};
 	int width{};
 	int scale{};
 	int pl_nr{};
 	std::vector<std::vector<int>> matrix;
-	std::vector<std::vector<int>> coordonates;
 	std::vector<std::vector<int>> pl_pos;
 	map(int h, int w, int s, int n) :
 		height(h),
 		width(w),
 		scale(s),
 		pl_nr(n),
-		pl_pos(n,std::vector<int>(2)),
-		coordonates(h*s, std::vector<int>(w*s, 0)) // Fills 400x400 coordinates with 0s
-
+		pl_pos(n,std::vector<int>(2))
 	{}
 };
-const int pl_width = 16;
+const int pl_width = 96;
 struct player {
 	int id{};
 	int health{};
@@ -79,6 +83,8 @@ struct player {
 	float aim_y{};
 	bool attack = false;
 	bool active = true;
+	bool connected = false;
+	ENetPeer* peer{ nullptr };
 	player(int h, string name, int x, int y, int range, int s, int a_r, int a_speed,int id, int a_d) :
 		health(h),
 		id(id),
@@ -128,60 +134,29 @@ struct player_input {
 	float aim_y{};
 };
 
-// Helper function to return a raylib Color based on cell value
-//Color GetCellColor(int value) {
-//	switch (value) {
-//	case 0:  return BLACK;        // Ground
-//	case 1:  return BLUE;       // Special/Goal
-//	case 2:  return YELLOW;        // Bush
-//	case 3:  return BROWN;        // Wall Type A
-//	case 4:  return DARKGRAY;     // Outer Wall
-//	default: return WHITE;        // Fallback
-//	}
-//};
-//std::vector<Color> pl_colors = {
-//	Color{ 230, 57,  70,  255 }, // 0. Crimson Red (Great for Player 1 / Enemy)
-//	Color{ 58,  125, 203, 255 }, // 1. Electric Blue (Great for Local Player Team)
-//	Color{ 46,  196, 182, 255 }, // 2. Bright Teal
-//	Color{ 255, 159, 28,  255 }, // 3. Neon Orange
-//	Color{ 155, 93,  229, 255 }, // 4. Vivid Purple
-//	Color{ 0,   204, 102, 255 }, // 5. Emerald Green
-//	Color{ 255, 0,   127, 255 }, // 6. Hot Pink
-//	Color{ 241, 91,  181, 255 }, // 7. Bubblegum Magenta
-//	Color{ 255, 214, 10,  255 }, // 8. Cyber Yellow
-//	Color{ 0,   245, 255, 255 }
-//};
-//std::vector<Color> pl_colors_team = {
-//	Color{ 255, 0,  0,  255 }, 
-//	Color{ 0,  0, 255, 255 }, 
-//};
-
 bool collision(map& map, int& new_x, int& new_y) {
-	int br_x = new_x + pl_width/2-1; //buttom-right corner
-	int br_y = new_y + pl_width/2-1; 
-	int tl_x = new_x - pl_width/2; //top-left corner
-	int tl_y = new_y - pl_width/2;
-	int tr_x = new_x + pl_width/2-1; //top-right corner
-	int tr_y = new_y - pl_width/2;
-	int bl_x = new_x - pl_width/2; //buttom-left corner
-	int bl_y = new_y + pl_width/2-1;
-	if (tl_x < 0 || br_x >= map.width*map.scale || tl_y < 0 || br_y >= map.height*map.scale) return false;
-	else{
-		if (((map.coordonates[br_y][br_x] == 0) || (map.coordonates[br_y][br_x] == 2) || (map.coordonates[br_y][br_x] == -1)) &&
-			((map.coordonates[tl_y][tl_x] == 0) || (map.coordonates[tl_y][tl_x] == 2) || (map.coordonates[tl_y][tl_x] == -1)) &&
-			((map.coordonates[bl_y][bl_x] == 0) || (map.coordonates[bl_y][bl_x] == 2) || (map.coordonates[bl_y][bl_x] == -1)) &&
-			((map.coordonates[tr_y][tr_x] == 0) || (map.coordonates[tr_y][tr_x] == 2) || (map.coordonates[tr_y][tr_x] == -1))) {
-			return true;
-		}
-		else {
+	int corners_x[4] = { new_x - pl_width / 2, new_x + pl_width / 2 - 1, new_x - pl_width / 2, new_x + pl_width / 2 - 1 };
+	int corners_y[4] = { new_y - pl_width / 2, new_y - pl_width / 2, new_y + pl_width / 2 - 1, new_y + pl_width / 2 - 1 };
+
+	for (int i = 0; i < 4; i++) {
+		int tile_x = corners_x[i] / map.scale;
+		int tile_y = corners_y[i] / map.scale;
+
+		if (tile_x < 0 || tile_x >= map.width || tile_y < 0 || tile_y >= map.height) return false;
+
+		int tile_type = map.matrix[tile_y][tile_x];
+		// 0 = floor, 2 = bush, everything else (like 3 or 4) is solid wall
+		if (tile_type != 0 && tile_type != 2) {
 			return false;
-		} 
+		}
 	}
+	return true;
 }
 bool aim(map& map, std::vector<player>& players, projectile& pr, float d_time) {
-	float length = std::sqrt(pr.aim_x * pr.aim_x + pr.aim_y * pr.aim_y);
+	float lengthSq = pr.aim_x * pr.aim_x + pr.aim_y * pr.aim_y;
 	float distance_min = pl_width / 2 + pr.radius;
-	if (length > 1.0f) {
+	if (lengthSq > 1.0f) {
+		float length = std::sqrt(lengthSq);
 		pr.aim_x /= length; // Scale X down (becomes ~0.707) if needed, cause it is a little redundant
 		pr.aim_y /= length; // Scale Y down (becomes ~0.707) if needed, cause it is a little redundant
 	}
@@ -193,17 +168,22 @@ bool aim(map& map, std::vector<player>& players, projectile& pr, float d_time) {
 	if (pr.distance >= pr.range) {
 		return false;
 	}
-	int* tile = &map.coordonates[pr.new_y][pr.new_x];
+	//int* tile = &map.coordonates[pr.new_y][pr.new_x];
+	int* tile = &map.matrix[pr.new_y/map.scale][pr.new_x/map.scale];
+
 	if ((*tile == 3) || (*tile == 4)) {
 		return false;
 	}
-	pr.distance += static_cast<int>(std::sqrt(pow(pr.new_x - pr.pos_x, 2) + pow(pr.new_y - pr.pos_y, 2)));
+	pr.distance += std::sqrt(pow(pr.new_x - pr.pos_x, 2) + pow(pr.new_y - pr.pos_y, 2));
 	pr.pos_x = pr.new_x;
 	pr.pos_y = pr.new_y;
 	for (int i = 0; i < players.size(); i++) {
 		if ((pr.id != i)&&players[i].active) {
 			if ((abs(players[i].pos_x - pr.pos_x) <= distance_min) &&(abs(players[i].pos_y - pr.pos_y) <= distance_min)) {
 				players[i].health -= pr.damage;
+				if (players[i].health <= 0) {
+					players[i].active = false;
+				}
 				return false;
 			}
 		}
@@ -212,8 +192,9 @@ bool aim(map& map, std::vector<player>& players, projectile& pr, float d_time) {
 }
 
 void movement_float(map& map, player& pl, double d_time) {
-	float length = std::sqrt(pl.joy_x * pl.joy_x + pl.joy_y * pl.joy_y);
-	if (length > 1.0f) {
+	float lengthSq = pl.joy_x * pl.joy_x + pl.joy_y * pl.joy_y;
+	if (lengthSq > 1.0f) {
+		float length = std::sqrt(lengthSq);
 		pl.joy_x /= length; // Scale X down (becomes ~0.707) if needed, cause it is a little redundant
 		pl.joy_y /= length; // Scale Y down (becomes ~0.707) if needed, cause it is a little redundant
 	}
@@ -222,19 +203,22 @@ void movement_float(map& map, player& pl, double d_time) {
 	pl.new_x = static_cast<int>(pl.pos_f_x);
 	pl.new_y = static_cast<int>(pl.pos_f_y);
 
-	if ((pl.new_x != pl.pos_x) && (collision(map, pl.new_x, pl.pos_y))) {
-		pl.pos_x = pl.new_x;
+	if (pl.new_x != pl.pos_x) {
+		if (collision(map, pl.new_x, pl.pos_y)) { 
+			pl.pos_x = pl.new_x;
+		}
+		else {
+			pl.pos_f_x = static_cast<float>(pl.pos_x);
+		}
 	}
-	else {
-
-		pl.pos_f_x = static_cast<float>(pl.pos_x);
-	}
-	if ((pl.new_y != pl.pos_y) && (collision(map, pl.pos_x, pl.new_y))) {
-		pl.pos_y = pl.new_y;	
-	}
-	else {
-		pl.pos_f_y = static_cast<float>(pl.pos_y);
-	}	
+	if (pl.new_y != pl.pos_y) {
+		if (collision(map, pl.pos_x, pl.new_y)) { 
+			pl.pos_y = pl.new_y;
+		}
+		else {
+			pl.pos_f_y = static_cast<float>(pl.pos_y);
+		}
+	}		
 }
 
 
@@ -243,7 +227,9 @@ int main() {
 	bool active = true;
 	std::vector<player> players;
 	std::vector<projectile> projectiles;
-	map default_map(39, 39,20,6);
+	map default_map(39, 39,128,6);
+	int max_view_x = default_map.width * default_map.scale / 2;
+	int max_view_y = default_map.height * default_map.scale / 2/16*9;
 	default_map.matrix = {
 		{4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4}, // 1
 		{4,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0,0,0,4}, // 2
@@ -294,51 +280,34 @@ int main() {
 		{34 * default_map.scale + default_map.scale/2, 21 * default_map.scale + default_map.scale/2},
 	};
 	for (int i = 0; i < default_map.pl_pos.size(); i++) {
-		player pl_temp(1000, "Player" + std::to_string(i), default_map.pl_pos[i][1], default_map.pl_pos[i][0], 100, 100, 4, 150,i, 100);
-		pl_temp.reload_time = 1;
+		player pl_temp(1000, "Player" + std::to_string(i), default_map.pl_pos[i][1], default_map.pl_pos[i][0], 960,640, 26,960,i, 100);
+		pl_temp.reload_time = 1;	
 		pl_temp.ammo = 3;
-		default_map.coordonates[pl_temp.pos_y][pl_temp.pos_x] = -i-1;
 		pl_temp.active = true;
+		pl_temp.peer = nullptr;
 		players.push_back(pl_temp);
-	}
-	for (int i = 0; i < default_map.height; i++) {
-		for (int j = 0; j < default_map.width; j++) {
-			for (int h = 0; h < default_map.scale; h++) {
-				for (int w = 0; w < default_map.scale; w++) {
-					default_map.coordonates[i * default_map.scale + h][j * default_map.scale + w] = default_map.matrix[i][j];
-				}
-			}
-			
-		}
 	}
 	if (enet_initialize() != 0) {
 		std::cerr << "An error occurred while initializing ENet.\n";
 		return 1;
 	}
-	// Schedule deinitialization when main() exits
 	atexit(enet_deinitialize);
 
-	// 2. Set up the address configuration
 	ENetAddress address;
-	address.host = ENET_HOST_ANY; // Listen to incoming connections on your laptop
-	address.port = 12345;         // The dedicated port for your game
-
-	// 3. Create the Server Host
-	ENetHost* server = enet_host_create(&address, 32, 2, 0, 0); // 32 max players, 2 channels
+	address.host = ENET_HOST_ANY; 
+	address.port = 12345;         
+	ENetHost* server = enet_host_create(&address, 32, 2, 0, 0);
 	if (server == nullptr) {
 		std::cerr << "An error occurred while trying to create an ENet server host.\n";
 		return 1;
 	}
-
 	cout << "Server started on port 12345. Waiting for clients...\n";
 
-	// 4. The Server Event Loop
 	ENetEvent event;
-	const double tick_rate = 30;
-	const double tick_time = 1 / tick_rate;
+	const double tick_rate = 69;
+	const double tick_time = 1.0f / tick_rate;
 	double accumulated_time = 0;
 	auto last_time = std::chrono::high_resolution_clock::now();
-	int players_connected = 0;
 	int projectile_ids = 0;
 	while (active) {
 		while (enet_host_service(server, &event, 0) > 0) {
@@ -347,18 +316,25 @@ int main() {
 				cout << "A new client connected from "
 					<< (*event.peer).address.host << ":"
 					<< event.peer->address.port << "\n";
-				// You can store player info inside the peer's custom pointer slot
-				event.peer->data = (void*)(uintptr_t)players_connected;	
-				ENetPacket* packet = enet_packet_create(&players_connected, sizeof(int), 0);
-				enet_peer_send(event.peer, 0, packet);
-				players_connected++;
+				
+				for (int i = 0; i < players.size(); i++) {
+					if (!players[i].connected) {
+						players[i].connected = true;
+						players[i].peer = event.peer; 
+						players[i].id = i;
+						event.peer->data = reinterpret_cast<void*>(static_cast<uintptr_t>(i));
+						id_assign id_sent;
+						id_sent.id = i;
+						ENetPacket* packet = enet_packet_create(&id_sent, sizeof(id_assign), 0);
+						enet_peer_send(event.peer, 0, packet);
+						break;
+					}
+				}
+				
 				break;
 			}
 			case ENET_EVENT_TYPE_RECEIVE:
-				//cout << "Packet received from " << (uintptr_t)event.peer->data
-				//	<< " | Size: " << event.packet->dataLength << " bytes"<< std::endl;
 				if (event.packet->dataLength == sizeof(player_input)) {
-					// Cast the raw byte packet->data pointer back into our clean C++ struct
 					player_input* received_input = (player_input*)event.packet->data;
 					uintptr_t target_id = (uintptr_t)event.peer->data;
 					for (auto& pl : players) {
@@ -377,30 +353,24 @@ int main() {
 							break;
 						}
 					}
-					// Now you can update your server-side simulation!
-					//cout << "Player "<< (uintptr_t)event.peer->data<<" moved to X : " << received_input->x
-					//	<< " Y: " << received_input->y << std::endl;
-
 				}
 				else {
 					std::cerr << "Received a malformed packet of unexpected size.\n";
 				}
-				// Clean up the packet memory after reading it!
 				enet_packet_destroy(event.packet);
 				break;
 
 			case ENET_EVENT_TYPE_DISCONNECT: {
-				cout << (uintptr_t)event.peer->data << " disconnected.\n";
-				uintptr_t disconnecting_id = (uintptr_t)event.peer->data;
-
-				// Find and remove the player from the vector
-				for (auto it = players.begin(); it != players.end(); ++it) {
-					if (it->id == disconnecting_id) {
-						players.erase(it);
-						break; // Found them, stop looking
+				if (event.peer->data != nullptr) {
+					uintptr_t disconnected_player = reinterpret_cast<uintptr_t>(event.peer->data);
+					cout << "Player " << disconnected_player << " disconnected." << std::endl;
+					for (auto it = players.begin(); it != players.end(); ++it) {
+						if (it->peer == players[disconnected_player].peer) {
+							players.erase(it);
+							break; 
+						}
 					}
 				}
-				event.peer->data = nullptr;
 				break;
 			}
 
@@ -408,20 +378,15 @@ int main() {
 				break;
 			}
 		}
-		// 3. Calculate Delta Time manually using <chrono>
 		auto current_time = std::chrono::high_resolution_clock::now();
-		// Find the difference in microseconds, then convert it to a fraction of a second (double)
 		std::chrono::duration<double> elapsed = current_time - last_time;
 		last_time = current_time;
-		// Add the real-world time passed into our bank
 		accumulated_time += elapsed.count();
-		WorldStatePacket world_snapshot = { 0 };
 		while (accumulated_time >= tick_time){	
 			for (int i = 0; i < players.size(); i++) {
-				world_snapshot.players[i].id = players[i].id;
-				if (players[i].active) {
+				if ((players[i].connected)&& (players[i].active)) {
 					movement_float(default_map, players[i], tick_time);
-					if (players[i].attack) {
+					if ((players[i].attack) && (projectiles.size() < MAX_PROJECTILES)) {
 						projectile pr(players[i].ammo_r, players[i].ammo_speed, players[i].range, players[i].ammo_damage);
 						pr.pos_x = players[i].pos_x;
 						pr.pos_y = players[i].pos_y;
@@ -436,59 +401,91 @@ int main() {
 						projectiles.push_back(pr);
 						players[i].attack = false;
 					}
-					world_snapshot.players[i].pos_x = players[i].pos_x;
-					world_snapshot.players[i].pos_y = players[i].pos_y;
-					world_snapshot.players[i].health = players[i].health;
-					if (players[i].health <= 0) {
-						players[i].active = false;
-						world_snapshot.players[i].active = false;
-					}
-					else {
-						players[i].active = true;
-						world_snapshot.players[i].active = true;
-					}
-				}
-				else {
-					world_snapshot.players[i].active = false;
-					world_snapshot.players[i].health = 0;
 				}
 			}
-			int i = 0;
 			auto it = projectiles.begin();
 			while (it != projectiles.end()) {
-
-				// 1. Run the aim logic and capture if it's alive or dead
 				bool is_alive = aim(default_map, players, *it, tick_time);
 
 				if (!is_alive) {
-					// 2. If false, erase cleanly! 
-					// erase() automatically returns the next valid iterator position.
 					it = projectiles.erase(it);
 				}
 				else {
-					// 3. If true, copy the updated positions to your network packet snapshot
-					world_snapshot.projectiles[i].pos_x = it->pos_x;
-					world_snapshot.projectiles[i].pos_y = it->pos_y;
-					world_snapshot.projectiles[i].radius = it->radius;
-					i++;
-
-					++it; // Manually advance to the next element safely
+					++it; 
 				}
 			}
-			world_snapshot.active_player_count = players.size();
-			world_snapshot.projectile_count = projectiles.size();
+			for (int i = 0; i < players.size(); i++) {
+				if ((players[i].connected) && (players[i].active)) {
+					if (players[i].health <= 0) {
+						players[i].active = false;
+						continue;
+					}
 
-			// 2. Create the ENet packet containing this snapshot
-			ENetPacket* state_packet = enet_packet_create(&world_snapshot,
-				sizeof(WorldStatePacket),
-				0);
-			enet_host_broadcast(server, 0, state_packet);
+					WorldStatePacket client_packet = { 0 };
+					client_packet.packet_type = static_cast<uint8_t>(PacketType::WORLD_STATE);
+					client_packet.active_player_count = 0;
+					player* pl = &players[i];
+					for (int j = 0; j < players.size(); j++) {
+						if ((players[j].id != pl->id) && (players[j].active)) {
+							int distance_x = abs(players[j].pos_x - pl->pos_x);
+							int distance_y = abs(players[j].pos_y - pl->pos_y);
+							int view_y = max_view_y;
+							if (pl->pos_y - max_view_y < 0) {
+								view_y -= pl->pos_y - max_view_y;
+							}else if (pl->pos_y + max_view_y > default_map.height * default_map.scale) {
+								view_y += pl->pos_y + max_view_y - default_map.height * default_map.scale;
+							}
+							int view_x = max_view_x;
+							if (pl->pos_x - max_view_x < 0) {
+								view_x -= pl->pos_x - max_view_x;
+							}else if (pl->pos_x + max_view_x > default_map.width*default_map.scale) {
+								view_x += pl->pos_x + max_view_x- default_map.width * default_map.scale;
+							}
+							if ((distance_x <= view_x) && (distance_y <= view_y)) {
+								client_packet.players[client_packet.active_player_count].pos_x = static_cast<uint16_t>(players[j].pos_x);
+								client_packet.players[client_packet.active_player_count].pos_y = static_cast<uint16_t>(players[j].pos_y);
+								client_packet.players[client_packet.active_player_count].active = players[j].active;
+								client_packet.players[client_packet.active_player_count].health = static_cast<uint16_t>(players[j].health);
+								client_packet.players[client_packet.active_player_count].id = static_cast<uint16_t>(players[j].id);
+								client_packet.active_player_count++;
+							}
+						}
+						else if (players[j].id == pl->id) {
+							client_packet.players[client_packet.active_player_count].pos_x = static_cast<uint16_t>(players[j].pos_x);
+							client_packet.players[client_packet.active_player_count].pos_y = static_cast<uint16_t>(players[j].pos_y);
+							client_packet.players[client_packet.active_player_count].active = players[j].active;
+							client_packet.players[client_packet.active_player_count].id = static_cast<uint16_t>(players[j].id);
+							client_packet.players[client_packet.active_player_count].health = static_cast<uint16_t>(players[j].health);
+							client_packet.active_player_count++;
+						}
+					}
+					client_packet.projectile_count = 0;
+					auto it = projectiles.begin();
+					while (it != projectiles.end()) {
+						int distance_x = abs(it->pos_x - pl->pos_x);
+						int distance_y = abs(it->pos_y - pl->pos_y);
+						if ((distance_x <= max_view_x) && (distance_y <= max_view_y)) {
+							client_packet.projectiles[client_packet.projectile_count].pos_x = static_cast<uint16_t>(it->pos_x);
+							client_packet.projectiles[client_packet.projectile_count].pos_y = static_cast<uint16_t> (it->pos_y);
+							client_packet.projectiles[client_packet.projectile_count].radius = static_cast<uint16_t>(it->radius);
+							client_packet.projectiles[client_packet.projectile_count].id = static_cast<uint16_t>(it->pr_id);
+							client_packet.projectile_count++;
+						}
+						++it; 
+					}			
+					int dynamic_size = sizeof(uint8_t) * 3 
+						+ (client_packet.active_player_count * sizeof(PlayerNetworkState))
+						+ (client_packet.projectile_count * sizeof(projectile_network));
+					ENetPacket* packet= enet_packet_create(&client_packet, dynamic_size, 0);
+					enet_peer_send(players[i].peer, 0, packet);
+				}
+			}
+			
+			
 			accumulated_time -= tick_time;
 		}
 		double time_left = tick_time - accumulated_time;
-		// 1. SAFE SLEEP: If we have plenty of time (more than 5ms), give the CPU a real break
 		if (time_left > 0.005) {
-			// Convert our seconds (double) into integer milliseconds for the sleep function
 			long long sleep_us = static_cast<long long>((time_left - 0.002) * 1000000);
 
 			if (sleep_us > 0) {
