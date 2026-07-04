@@ -24,7 +24,8 @@ enum class PacketType : uint8_t {
 	LOBBY_COUNT = 3,
 	FORCE_CONNECT = 4,
 	press_play = 5,
-	input = 6
+	input = 6,
+	disconnect=7
 };
 struct MatchStatePacket {
 	uint8_t packet_type = static_cast<uint8_t>(PacketType::MATCH_STATE_CHANGE);
@@ -54,19 +55,15 @@ struct WorldStatePacket {
 	projectile_network projectiles[MAX_PROJECTILES];
 
 };
-struct id_assign {
-	uint8_t packet_type = static_cast<uint8_t>(PacketType::ID_ASSIGNMENT);
-	uint8_t id{};
-};
 struct force_connect {
 	uint8_t packet_type = static_cast<uint8_t>(PacketType::FORCE_CONNECT);
 };
-struct lobby_count {
-	uint8_t packet_type = static_cast<uint8_t>(PacketType::LOBBY_COUNT);
-	uint8_t count{};
-};
+
 struct pressed_play {
 	uint8_t packet_type = static_cast<uint8_t>(PacketType::press_play);
+};
+struct disconnect {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::disconnect);
 };
 struct player_input {
 	uint8_t packet_type = static_cast<uint8_t>(PacketType::input);
@@ -91,6 +88,9 @@ enum class GameState {
 	STATE_PLAYING,
 	STATE_GAME_OVER
 };
+std::unordered_map<int, string>maps = {
+	{0, "maps/default_map.txt"}
+};
 struct map {
 	int height{};
 	int width{};
@@ -98,13 +98,34 @@ struct map {
 	int pl_nr{};
 	std::vector<std::vector<int>> matrix;
 	std::vector<std::vector<int>> pl_pos;
-	map(int h, int w, int s, int n) :
-		height(h),
-		width(w),
-		scale(s),
-		pl_nr(n),
-		pl_pos(n, std::vector<int>(2))
-	{
+	bool load_file(const std::string& filepath) {
+		std::ifstream file(filepath);
+		if (!file.is_open()) {
+			std::cerr << "Error loading map file: " << filepath << "\n";
+			return false;
+		}
+		file >> height >> width >> scale >> pl_nr;
+		matrix.resize(height, std::vector<int>(width, 0));
+		pl_pos.clear();
+
+		for (int y = 0; y < height; ++y) {
+			for (int x = 0; x < width; ++x) {
+				int tileValue;
+				file >> tileValue;
+				if (tileValue == -1) {
+					int pixelX = x * scale + (scale / 2);
+					int pixelY = y * scale + (scale / 2);
+					pl_pos.push_back({ pixelY, pixelX });
+					matrix[y][x] = 0;
+				}
+				else {
+					matrix[y][x] = tileValue;
+				}
+			}
+		}
+
+		file.close();
+		return true;
 	}
 };
 const int pl_width = 96;
@@ -237,7 +258,50 @@ void SendInputToServer(ENetPeer* peer, player_input input) {
 	ENetPacket* packet = enet_packet_create(&input, sizeof(player_input), 0);
 	enet_peer_send(peer, 0, packet);
 }
-void match_drawing( std::optional<WorldStatePacket> (&world_buffer)[3],const std::optional<double>(&time_buffer)[3], std::vector<player>& players, map& default_map, RenderTexture2D& canvas,const int my_id, const int virtualWidth, const int virtualHeight, const int& max_view_x, const int& max_view_y, const int& windowWidth, const int& windowHeight) {
+void draw_tile(int screenX, int screenY, int size, int cellValue,int x, int y) {
+	DrawRectangle(screenX, screenY, size, size, Color{ 15, 18, 26, 255 });
+
+	DrawRectangleLines(screenX, screenY, size, size, Color{ 30, 41, 59, 100 });
+
+	switch (cellValue) {
+	case 0: { 
+		if ((x * 3 + y * 7) % 5 == 0) {
+			DrawLine(screenX + size / 2 - 10, screenY + size / 2, screenX + size / 2 + 10, screenY + size / 2, Color{ 51, 65, 85, 150 });
+			DrawLine(screenX + size / 2, screenY + size / 2 - 10, screenX + size / 2, screenY + size / 2 + 10, Color{ 51, 65, 85, 150 });
+		}
+		break;
+	}
+	case 1: {
+		DrawRectangle(screenX + 4, screenY + 4, size - 8, size - 8, Color{ 25, 30, 45, 255 });
+		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 3.0f, BLUE);
+		break;
+	}
+	case 2: {
+		DrawRectangle(screenX + 4, screenY + 4, size - 8, size - 8, Color{ 25, 30, 45, 255 });
+		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 3.0f, YELLOW);
+		break;
+	}
+	case 3: { 
+		DrawRectangle(screenX + 4, screenY + 4, size - 8, size - 8, Color{ 25, 30, 45, 255 });
+		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 3.0f, Color{ 255, 120, 0, 255 });
+		DrawRectangle(screenX + size / 4, screenY + size / 4, size / 2, size / 2, Color{ 40, 48, 68, 255 });
+		break;
+	}
+	case 4: { 
+		DrawRectangle(screenX + 2, screenY + 2, size - 4, size - 4, Color{ 10, 12, 18, 255 });
+		DrawRectangleLinesEx(Rectangle{ (float)screenX + 2, (float)screenY + 2, (float)size - 4, (float)size - 4 }, 4.0f, Color{ 0, 245, 255, 255 });
+		DrawLineEx(Vector2{ (float)screenX + 15, (float)screenY + 15 }, Vector2{ (float)screenX + size - 15, (float)screenY + size - 15 }, 2.0f, Color{ 0, 245, 255, 150 });
+		DrawLineEx(Vector2{ (float)screenX + size - 15, (float)screenY + 15 }, Vector2{ (float)screenX + 15, (float)screenY + size - 15 }, 2.0f, Color{ 0, 245, 255, 150 });
+		break;
+	}
+	default:
+		break;
+	}
+	
+}
+
+
+void match_drawing( std::optional<WorldStatePacket> (&world_buffer)[3],const std::optional<double>(&time_buffer)[3], std::vector<player>& players, map& map, RenderTexture2D& canvas,const int my_id, const int virtualWidth, const int virtualHeight, const int& max_view_x, const int& max_view_y, const int& windowWidth, const int& windowHeight) {
 	float scale = fminf((float)windowWidth / virtualWidth, (float)windowHeight / virtualHeight);
 
 	float targetWidth = virtualWidth * scale;
@@ -294,18 +358,18 @@ void match_drawing( std::optional<WorldStatePacket> (&world_buffer)[3],const std
 	int my_screen_y = players[my_id].pos_y;
 	int cam_offset_x = my_screen_x - max_view_x;
 	int cam_offset_y = my_screen_y - max_view_y;
-	int max_cam_x = (default_map.width * default_map.scale) - (2 * max_view_x);
-	int max_cam_y = (default_map.height * default_map.scale) - (2 * max_view_y);
+	int max_cam_x = (map.width * map.scale) - (2 * max_view_x);
+	int max_cam_y = (map.height * map.scale) - (2 * max_view_y);
 	cam_offset_x = std::clamp(cam_offset_x, 0, max_cam_x);
 	cam_offset_y = std::clamp(cam_offset_y, 0, max_cam_y);
-	for (int y = 0; y < default_map.height; ++y) {
-		for (int x = 0; x < default_map.width; ++x) {
-			Color tileColor = GetCellColor(default_map.matrix[y][x]);
-			int tile_draw_x = (x * default_map.scale) - cam_offset_x;
-			int tile_draw_y = (y * default_map.scale) - cam_offset_y;
-			if (tile_draw_x >= -default_map.scale && tile_draw_x <= virtualWidth &&
-				tile_draw_y >= -default_map.scale && tile_draw_y <= virtualHeight) {
-				DrawRectangle(tile_draw_x, tile_draw_y, default_map.scale, default_map.scale, tileColor);
+	for (int y = 0; y < map.height; ++y) {
+		for (int x = 0; x < map.width; ++x) {
+			Color tileColor = GetCellColor(map.matrix[y][x]);
+			int tile_draw_x = (x * map.scale) - cam_offset_x;
+			int tile_draw_y = (y * map.scale) - cam_offset_y;
+			if (tile_draw_x >= -map.scale && tile_draw_x <= virtualWidth &&
+				tile_draw_y >= -map.scale && tile_draw_y <= virtualHeight) {
+				draw_tile(tile_draw_x, tile_draw_y, map.scale, map.matrix[y][x], x, y);
 			}
 		}
 	}
@@ -318,10 +382,22 @@ void match_drawing( std::optional<WorldStatePacket> (&world_buffer)[3],const std
 		int final_draw_x = players[p_id].pos_x - cam_offset_x - (pl_width / 2);
 		int final_draw_y = players[p_id].pos_y - cam_offset_y - (pl_width / 2);
 		int team_idx = (p_id < players.size() / 2) ? 0 : 1;
-		DrawRectangle(final_draw_x, final_draw_y, pl_width, pl_width, pl_colors_team[team_idx]);
-		DrawText(TextFormat("%d", players[p_id].health), final_draw_x, final_draw_y - 96, 64, GREEN);
-		if (p_id == my_id) {
-			DrawText(TextFormat("%d", world_1->ammo), final_draw_x, final_draw_y - 160, 64, RED);
+		int tile = map.matrix[players[p_id].pos_y / map.scale][players[p_id].pos_x / map.scale];
+		if (tile == 2) {
+			if (p_id == my_id) {
+				pl_colors_team[team_idx].a = 128;
+				DrawRectangle(final_draw_x, final_draw_y, pl_width, pl_width, pl_colors_team[team_idx]);
+				DrawText(TextFormat("%d", players[p_id].health), final_draw_x, final_draw_y - 96, 64, GREEN);
+				DrawText(TextFormat("%d", world_1->ammo), final_draw_x, final_draw_y - 160, 64, RED);
+			}
+		}
+		else {
+			pl_colors_team[team_idx].a = 255;
+			DrawRectangle(final_draw_x, final_draw_y, pl_width, pl_width, pl_colors_team[team_idx]);
+			DrawText(TextFormat("%d", players[p_id].health), final_draw_x, final_draw_y - 96, 64, GREEN);
+			if (p_id == my_id) {
+				DrawText(TextFormat("%d", world_1->ammo), final_draw_x, final_draw_y - 160, 64, RED);
+			}
 		}
 	}
 
@@ -423,61 +499,24 @@ int main() {
 	string menu_names[4] = {"Play","Change Shape", "Change Map", "Settings"};
 	for (int i = 0; i < 4; i++) menu[i].name = menu_names[i];
 	menu[0].selected = true;
-	map default_map(39, 39, 128, 6);
-	int max_view_x = default_map.width * default_map.scale / 2;
-	int max_view_y = default_map.width * default_map.scale / 2 / 16 * 9;
+	map current_map;
+	auto file_name = maps.find(0);
+	if (file_name != maps.end()) {
+		if (!current_map.load_file(file_name->second)) {
+			cout << "No map found in file" << std::endl;
+			std::cin.get();
+			return -1;
+		}
+		else {
+			cout << "map loaded succesfully, width " << current_map.width << " height " << current_map.height << std::endl;
+		}
+	}
+	int max_view_x = current_map.width * current_map.scale / 2;
+	int max_view_y = current_map.width * current_map.scale / 2 / 16 * 9;
 	GameState current_state = GameState::STATE_MENU;
-	default_map.matrix = {
-		{4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4}, // 1
-		{4,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0,0,0,4}, // 2
-		{4,0,0,4,4,3,3,4,4,0,0,0,0,2,2,2,0,0,4,4,4,0,0,0,2,2,2,0,0,0,0,4,4,3,3,4,4,0,4}, // 3
-		{4,0,0,4,4,3,3,4,4,0,0,0,0,2,2,2,0,0,4,4,4,0,0,0,2,2,2,0,0,0,0,4,4,3,3,4,4,0,4}, // 4
-		{4,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,3,0,0,0,0,0,3,3,3,3,3,3,0,0,0,0,0,0,0,0,0,0,4}, // 5
-		{4,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,3,0,0,0,0,0,3,3,3,3,3,3,0,0,0,0,0,0,0,0,0,0,4}, // 6
-		{4,2,2,2,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,2,2,2,4}, // 7
-		{4,2,2,2,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,2,2,2,4}, // 8
-		{4,2,2,2,0,4,4,0,0,0,0,0,0,0,3,3,4,4,0,0,0,4,4,3,3,0,0,0,0,0,0,0,4,4,0,2,2,2,4}, // 9
-		{4,0,0,0,0,4,4,0,0,0,0,0,0,0,3,3,4,4,0,0,0,4,4,3,3,0,0,0,0,0,0,0,4,4,0,0,0,0,4}, // 10
-		{4,0,0,0,0,3,3,0,0,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,3,3,0,0,0,0,4}, // 11
-		{4,0,0,0,0,3,3,0,0,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,3,3,0,0,0,0,4}, // 12
-		{4,0,4,4,0,0,0,0,0,2,2,2,2,0,1,1,1,1,0,0,0,1,1,1,1,0,2,2,2,2,0,0,0,0,0,4,4,0,4}, // 13
-		{4,0,4,4,0,0,0,0,0,2,2,2,2,0,1,1,1,1,0,0,0,1,1,1,1,0,2,2,2,2,0,0,0,0,0,4,4,0,4}, // 14
-		{4,0,3,3,0,0,4,4,4,4,0,0,0,0,1,1,1,1,0,0,0,1,1,1,1,0,0,0,0,4,4,4,4,0,0,3,3,0,4}, // 15
-		{4,0,3,3,0,0,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,4,4,0,0,3,3,0,4}, // 16
-		{4,0,0,0,0,0,3,3,3,3,0,0,2,2,2,2,2,2,0,0,0,2,2,2,2,2,2,0,0,3,3,3,3,0,0,0,0,0,4}, // 17
-		{4,0,0,0,0,0,3,3,3,3,0,0,2,2,2,2,2,2,0,0,0,2,2,2,2,2,2,0,0,3,3,3,3,0,0,0,0,0,4}, // 18
-		{4,0,0,4,4,0,0,0,0,0,0,0,2,2,2,2,2,2,0,0,0,2,2,2,2,2,2,0,0,0,0,0,0,0,4,4,0,0,4}, // 19
-		{4,0,0,4,4,0,0,0,0,0,0,0,0,0,0,3,3,0,0,4,0,0,3,3,0,0,0,0,0,0,0,0,0,0,4,4,0,0,4}, // 20 
-		{4,0,0,4,4,0,0,0,0,0,0,0,2,2,2,2,2,2,0,0,0,2,2,2,2,2,2,0,0,0,0,0,0,0,4,4,0,0,4}, // 21
-		{4,0,0,0,0,0,3,3,3,3,0,0,2,2,2,2,2,2,0,0,0,2,2,2,2,2,2,0,0,3,3,3,3,0,0,0,0,0,4}, // 22
-		{4,0,0,0,0,0,3,3,3,3,0,0,2,2,2,2,2,2,0,0,0,2,2,2,2,2,2,0,0,3,3,3,3,0,0,0,0,0,4}, // 23
-		{4,0,3,3,0,0,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,4,4,0,0,3,3,0,4}, // 24
-		{4,0,3,3,0,0,4,4,4,4,0,0,0,0,1,1,1,1,0,0,0,1,1,1,1,0,0,0,0,4,4,4,4,0,0,3,3,0,4}, // 25
-		{4,0,4,4,0,0,0,0,0,2,2,2,2,0,1,1,1,1,0,0,0,1,1,1,1,0,2,2,2,2,0,0,0,0,0,4,4,0,4}, // 26
-		{4,0,4,4,0,0,0,0,0,2,2,2,2,0,1,1,1,1,0,0,0,1,1,1,1,0,2,2,2,2,0,0,0,0,0,4,4,0,4}, // 27
-		{4,0,0,0,0,3,3,0,0,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,3,3,0,0,0,0,4}, // 28
-		{4,0,0,0,0,3,3,0,0,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,3,3,0,0,0,0,4}, // 29
-		{4,0,0,0,0,4,4,0,0,0,0,0,0,0,3,3,4,4,0,0,0,4,4,3,3,0,0,0,0,0,0,0,4,4,0,0,0,0,4}, // 30
-		{4,2,2,2,0,4,4,0,0,0,0,0,0,0,3,3,4,4,0,0,0,4,4,3,3,0,0,0,0,0,0,0,4,4,0,2,2,2,4}, // 31
-		{4,2,2,2,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,2,2,2,4}, // 32
-		{4,2,2,2,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,2,2,2,4}, // 33
-		{4,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,3,0,0,0,0,0,3,3,3,3,3,3,0,0,0,0,0,0,0,0,0,0,4}, // 34
-		{4,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,3,0,0,0,0,0,3,3,3,3,3,3,0,0,0,0,0,0,0,0,0,0,4}, // 35
-		{4,0,0,4,4,3,3,4,4,0,0,0,0,2,2,2,0,0,4,4,4,0,0,0,2,2,2,0,0,0,0,4,4,3,3,4,4,0,4}, // 36
-		{4,0,0,4,4,3,3,4,4,0,0,0,0,2,2,2,0,0,4,4,4,0,0,0,2,2,2,0,0,0,0,4,4,3,3,4,4,0,4}, // 37
-		{4,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0,0,0,4}, // 38
-		{4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4}  // 39
-	};
-	default_map.pl_pos = {
-		{ 4 * default_map.scale + default_map.scale / 2, 17 * default_map.scale + default_map.scale / 2},
-		{ 4 * default_map.scale + default_map.scale / 2, 19 * default_map.scale + default_map.scale / 2},
-		{ 4 * default_map.scale + default_map.scale / 2, 21 * default_map.scale + default_map.scale / 2},
-		{34 * default_map.scale + default_map.scale / 2, 17 * default_map.scale + default_map.scale / 2},
-		{34 * default_map.scale + default_map.scale / 2, 19 * default_map.scale + default_map.scale / 2},
-		{34 * default_map.scale + default_map.scale / 2, 21 * default_map.scale + default_map.scale / 2},
-	};
-	for (int i = 0; i < default_map.pl_pos.size(); i++) {
-		player pl_temp(1000, "Player" + std::to_string(i), default_map.pl_pos[i][1], default_map.pl_pos[i][0],i);
+
+	for (int i = 0; i < current_map.pl_pos.size(); i++) {
+		player pl_temp(1000, "Player" + std::to_string(i), current_map.pl_pos[i][1], current_map.pl_pos[i][0],i);
 		pl_temp.active = true;
 		players.push_back(pl_temp);
 	}
@@ -523,13 +562,15 @@ int main() {
 	InitWindow(win_width, win_height, "ceva game client");
 	SetTargetFPS(144);
 	RenderTexture2D canvas = LoadRenderTexture(virtualWidth, virtualHeight);
-	SetTextureFilter(canvas.texture, TEXTURE_FILTER_POINT);
+	SetTextureFilter(canvas.texture, TEXTURE_FILTER_TRILINEAR);
 	int players_waiting=0;
 	int my_result = 0;
 	while (active && !WindowShouldClose()) {
-		if (IsKeyDown(KEY_X)) {
+		if (IsKeyDown(KEY_X)|| WindowShouldClose()) {
 			active = false;
-			continue;
+			disconnect ceva;
+			ENetPacket* packet= enet_packet_create(&ceva, sizeof(disconnect), ENET_PACKET_FLAG_RELIABLE);
+			enet_peer_send(peer, 0, packet);
 		}
 		int windowWidth = GetScreenWidth();
 		int windowHeight = GetScreenHeight();
@@ -538,9 +579,9 @@ int main() {
 			case ENET_EVENT_TYPE_RECEIVE: {
 				uint8_t packet_type = event.packet->data[0];
 				if (packet_type == static_cast<uint8_t>(PacketType::ID_ASSIGNMENT)) {
-					id_assign* id_received = reinterpret_cast<id_assign*>(event.packet->data);
-					my_id = id_received->id;
-					cout << "Server assigned me Player ID: " << id_received->id << std::flush;
+					 
+					my_id = event.packet->data[1];
+					cout << "Server assigned me Player ID: " << my_id << std::flush;
 				}
 				else if (packet_type == static_cast<uint8_t>(PacketType::WORLD_STATE)) {
 					if (event.packet->dataLength < 3) {
@@ -619,6 +660,7 @@ int main() {
 				break;
 			}
 		}
+		if (!active)continue;
 		switch (current_state) {
 		case GameState::STATE_MENU: {
 			BeginDrawing();
@@ -708,7 +750,7 @@ int main() {
 				enet_peer_send(peer, 0, packet);
 			}
 			DrawText("Waiting for players", windowWidth / 2 - 180, windowHeight / 3, 30, YELLOW);
-			DrawText(TextFormat("%d / %d", players_waiting, default_map.pl_nr), windowWidth / 2 - 150, windowHeight / 2, 20, RAYWHITE);
+			DrawText(TextFormat("%d / %d", players_waiting, current_map.pl_nr), windowWidth / 2 - 150, windowHeight / 2, 20, RAYWHITE);
 			EndDrawing();
 			break;
 		}
@@ -717,15 +759,15 @@ int main() {
 			if (my_id != -1) {
 				SendInputToServer(peer, input);
 			}
-				match_drawing(world_buffer, time_buffer, players, default_map, canvas, my_id, virtualWidth, virtualHeight, max_view_x, max_view_y,windowWidth,windowHeight);
+				match_drawing(world_buffer, time_buffer, players, current_map, canvas, my_id, virtualWidth, virtualHeight, max_view_x, max_view_y,windowWidth,windowHeight);
 			break;
 		}
 		case GameState::STATE_GAME_OVER: {
 			while (enet_host_service(client, &event, 0) > 0) { 
 				enet_packet_destroy(event.packet); 
 			}
-			for (int i = 0; i < default_map.pl_pos.size(); i++) {
-				player pl_temp(1000, "Player" + std::to_string(i), default_map.pl_pos[i][1], default_map.pl_pos[i][0], i);
+			for (int i = 0; i < current_map.pl_pos.size(); i++) {
+				player pl_temp(1000, "Player" + std::to_string(i), current_map.pl_pos[i][1], current_map.pl_pos[i][0], i);
 				pl_temp.active = true;
 				players.push_back(pl_temp);
 			}
