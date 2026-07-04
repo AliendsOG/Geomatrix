@@ -19,9 +19,18 @@ using std::string;
 #define MAX_PROJECTILES 100
 enum class PacketType : uint8_t {
 	ID_ASSIGNMENT = 0,
-	WORLD_STATE = 1
+	WORLD_STATE = 1,
+	MATCH_STATE_CHANGE = 2,
+	LOBBY_COUNT = 3,
+	FORCE_CONNECT = 4,
+	press_play = 5,
+	input = 6
 };
-
+struct MatchStatePacket {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::MATCH_STATE_CHANGE);
+	uint8_t new_state;
+	uint8_t winner_id;
+};
 
 struct PlayerNetworkState {
 	uint16_t pos_x{};
@@ -36,22 +45,52 @@ struct projectile_network {
 	uint16_t radius{};
 	uint16_t id{};
 };
-// This is the full package sent over the network
 struct WorldStatePacket {
-	uint8_t packet_type = static_cast<uint8_t>(PacketType::WORLD_STATE); // 1 byte header!
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::WORLD_STATE);
 	uint8_t active_player_count{};
 	uint8_t projectile_count{};
+	uint8_t ammo{};
 	PlayerNetworkState players[MAX_PLAYERS];
 	projectile_network projectiles[MAX_PROJECTILES];
 
 };
 struct id_assign {
-	uint8_t packet_type = static_cast<uint8_t>(PacketType::ID_ASSIGNMENT); // 1 byte header!
-	uint8_t id;
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::ID_ASSIGNMENT);
+	uint8_t id{};
+};
+struct force_connect {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::FORCE_CONNECT);
+};
+struct lobby_count {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::LOBBY_COUNT);
+	uint8_t count{};
+};
+struct pressed_play {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::press_play);
+};
+struct player_input {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::input);
+	float x{};
+	float y{};
+	bool attack{};
+	float aim_x{};
+	float aim_y{};
+	player_input(float x, float y, bool a) :
+		x(x),
+		y(y),
+		attack(a)
+	{
+	}
 };
 #pragma pack(pop)
 
 //network stuff end
+enum class GameState {
+	STATE_MENU,
+	STATE_lobby,
+	STATE_PLAYING,
+	STATE_GAME_OVER
+};
 struct map {
 	int height{};
 	int width{};
@@ -95,19 +134,7 @@ struct projectile {
 	float pos_f_x{};
 	float pos_f_y{};
 };
-struct player_input {
-	float x{};
-	float y{};
-	bool attack{};
-	float aim_x{};
-	float aim_y{};
-	player_input(float x, float y, bool a) :
-		x(x),
-		y(y),
-		attack(a)
-	{
-	}
-};
+
 
 Color GetCellColor(int value) {
 	switch (value) {
@@ -187,13 +214,13 @@ auto movement_float(bool gamepad) {
 
 	
 	float lengthSq = joy_x * joy_x + joy_y * joy_y;
-	if (lengthSq > 1.0f) { // 1.0 squared is still 1.0
+	if (lengthSq > 1.0f) {
 		float length = std::sqrt(lengthSq);
 		joy_x /= length;
 		joy_y /= length;
 	}
 	lengthSq = aim_x * aim_x + aim_y * aim_y;
-	if (lengthSq > 1.0f) { // 1.0 squared is still 1.0
+	if (lengthSq > 1.0f) { 
 		float length = std::sqrt(lengthSq);
 		aim_x /= length;
 		aim_y /= length;
@@ -210,10 +237,179 @@ void SendInputToServer(ENetPeer* peer, player_input input) {
 	ENetPacket* packet = enet_packet_create(&input, sizeof(player_input), 0);
 	enet_peer_send(peer, 0, packet);
 }
-enum class GameState {
-	STATE_MENU,
-	STATE_PLAYING,
-	STATE_GAME_OVER
+void match_drawing( std::optional<WorldStatePacket> (&world_buffer)[3],const std::optional<double>(&time_buffer)[3], std::vector<player>& players, map& default_map, RenderTexture2D& canvas,const int my_id, const int virtualWidth, const int virtualHeight, const int& max_view_x, const int& max_view_y, const int& windowWidth, const int& windowHeight) {
+	float scale = fminf((float)windowWidth / virtualWidth, (float)windowHeight / virtualHeight);
+
+	float targetWidth = virtualWidth * scale;
+	float targetHeight = virtualHeight * scale;
+	float offsetX = (windowWidth - targetWidth) / 2.0f;
+	float offsetY = (windowHeight - targetHeight) / 2.0f;
+	BeginTextureMode(canvas);
+	ClearBackground(BLACK);
+	float current_client_time = GetTime();
+
+	float render_time = current_client_time - 2.0f / 69.0f;
+	WorldStatePacket* world_1 = nullptr;
+	WorldStatePacket* world_2 = nullptr;
+	if (world_buffer[1].has_value()) {
+		world_1 = &world_buffer[1].value();
+		world_2 = &world_buffer[2].value();
+	}
+
+	if (world_1 && world_2 && my_id != -1 && players[my_id].active) {
+	DrawText(TextFormat("%d", world_1->active_player_count), 10, 20, 10, GREEN);
+	float time_between_packets = time_buffer[2].value() - time_buffer[1].value();
+	float elapsed_time = render_time - time_buffer[1].value();
+	float t = (time_between_packets > 0.0f) ? (elapsed_time / time_between_packets) : 1.0f;
+	t = std::clamp(t, 0.0f, 1.0f);
+	for (auto& pl : players) {
+		pl.active = false;
+	}
+	for (int i = 0; i < world_1->active_player_count; i++) {
+		auto& p1 = world_1->players[i];
+		uint8_t p_id = static_cast<uint8_t>(p1.id);
+		if (p_id >= players.size()) continue;
+		players[p_id].active = true;
+		players[p_id].health = p1.health;
+		int w2_index = -1;
+		for (int j = 0; j < world_2->active_player_count; j++) {
+			if (world_2->players[j].id == p_id) {
+				w2_index = j;
+				break;
+			}
+		}
+		if (w2_index != -1) {
+			auto& p2 = world_2->players[w2_index];
+			players[p_id].pos_f_x = p1.pos_x + (p2.pos_x - p1.pos_x) * t;
+			players[p_id].pos_f_y = p1.pos_y + (p2.pos_y - p1.pos_y) * t;
+		}
+		else {
+			players[p_id].pos_f_x = p1.pos_x;
+			players[p_id].pos_f_y = p1.pos_y;
+		}
+		players[p_id].pos_x = static_cast<int>(players[p_id].pos_f_x);
+		players[p_id].pos_y = static_cast<int>(players[p_id].pos_f_y);
+	}
+	int my_screen_x = players[my_id].pos_x;
+	int my_screen_y = players[my_id].pos_y;
+	int cam_offset_x = my_screen_x - max_view_x;
+	int cam_offset_y = my_screen_y - max_view_y;
+	int max_cam_x = (default_map.width * default_map.scale) - (2 * max_view_x);
+	int max_cam_y = (default_map.height * default_map.scale) - (2 * max_view_y);
+	cam_offset_x = std::clamp(cam_offset_x, 0, max_cam_x);
+	cam_offset_y = std::clamp(cam_offset_y, 0, max_cam_y);
+	for (int y = 0; y < default_map.height; ++y) {
+		for (int x = 0; x < default_map.width; ++x) {
+			Color tileColor = GetCellColor(default_map.matrix[y][x]);
+			int tile_draw_x = (x * default_map.scale) - cam_offset_x;
+			int tile_draw_y = (y * default_map.scale) - cam_offset_y;
+			if (tile_draw_x >= -default_map.scale && tile_draw_x <= virtualWidth &&
+				tile_draw_y >= -default_map.scale && tile_draw_y <= virtualHeight) {
+				DrawRectangle(tile_draw_x, tile_draw_y, default_map.scale, default_map.scale, tileColor);
+			}
+		}
+	}
+
+	for (int i = 0; i < world_1->active_player_count; i++) {
+		auto& p1 = world_1->players[i];
+		uint8_t p_id = static_cast<uint8_t>(p1.id);
+		if (p_id >= players.size() || !players[p_id].active) continue;
+
+		int final_draw_x = players[p_id].pos_x - cam_offset_x - (pl_width / 2);
+		int final_draw_y = players[p_id].pos_y - cam_offset_y - (pl_width / 2);
+		int team_idx = (p_id < players.size() / 2) ? 0 : 1;
+		DrawRectangle(final_draw_x, final_draw_y, pl_width, pl_width, pl_colors_team[team_idx]);
+		DrawText(TextFormat("%d", players[p_id].health), final_draw_x, final_draw_y - 96, 64, GREEN);
+		if (p_id == my_id) {
+			DrawText(TextFormat("%d", world_1->ammo), final_draw_x, final_draw_y - 160, 64, RED);
+		}
+	}
+
+	for (int i = 0; i < world_1->projectile_count; i++) {
+		auto& proj1 = world_1->projectiles[i];
+		uint8_t target_p_id = proj1.id;
+		int w2_index = -1;
+		for (int j = 0; j < world_2->projectile_count; j++) {
+			if (world_2->projectiles[j].id == target_p_id) {
+				w2_index = j;
+				break;
+			}
+		}
+		float proj_screen_f_x = 0.0f;
+		float proj_screen_f_y = 0.0f;
+		if (w2_index != -1) {
+			auto& proj2 = world_2->projectiles[w2_index];
+			proj_screen_f_x = proj1.pos_x + t * (proj2.pos_x - proj1.pos_x);
+			proj_screen_f_y = proj1.pos_y + t * (proj2.pos_y - proj1.pos_y);
+		}
+		else {
+			proj_screen_f_x = proj1.pos_x;
+			proj_screen_f_y = proj1.pos_y;
+		}
+		int proj_screen_x = static_cast<int>(proj_screen_f_x);
+		int proj_screen_y = static_cast<int>(proj_screen_f_y);
+		int final_proj_x = proj_screen_x - cam_offset_x - (proj1.radius / 2);
+		int final_proj_y = proj_screen_y - cam_offset_y - (proj1.radius / 2);
+		DrawCircle(final_proj_x, final_proj_y, proj1.radius, Color{ 155, 93, 229, 255 });
+	}
+}
+			else {
+	DrawText("CONNECTING TO SERVER...", virtualWidth / 2 - 140, virtualHeight / 2 - 10, 20, RAYWHITE);
+	}
+	EndTextureMode();
+	BeginDrawing();
+	ClearBackground(BLACK);
+	Rectangle sourceRec = { 0.0f, 0.0f, (float)virtualWidth, -(float)virtualHeight };
+	Rectangle destRec = { offsetX, offsetY, targetWidth, targetHeight };
+	Vector2 origin = { 0.0f, 0.0f };
+	DrawTexturePro(canvas.texture, sourceRec, destRec, origin, 0.0f, WHITE);
+	DrawFPS(10, 10);
+	EndDrawing();
+}
+struct menu_option {
+	string name;
+	bool selected = false;
+};
+class button {
+public:
+	Rectangle bounds;
+	Color baseColor;
+	Color hoverColor;
+	Color activeColor;
+	const char* text;
+	int fontSize;
+	button(float x, float y, float width, float height, const char* buttonText, int size) {
+		bounds = { x, y, width, height };
+		baseColor = RED;
+		hoverColor = YELLOW;
+		activeColor = BLACK;
+		text = buttonText;
+		fontSize = size;
+	}
+	bool IsPressed(Vector2 mousePos) {
+		return CheckCollisionPointRec(mousePos, bounds) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+	}
+	void Draw(Vector2 mousePos, bool selected) {
+		Color currentColor = baseColor;
+		if (CheckCollisionPointRec(mousePos, bounds)) {
+			if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+				currentColor = activeColor;
+			}
+			else {
+				currentColor = hoverColor;
+			}
+		}
+		if (selected) {
+			currentColor = hoverColor;
+		}
+		DrawRectangleRounded(bounds, 0.69, 9, currentColor);
+
+		int textWidth = MeasureText(text, fontSize);
+		float textX = bounds.x + (bounds.width - textWidth) / 2;
+		float textY = bounds.y + (bounds.height - fontSize) / 2;
+		DrawText(text, textX, textY, fontSize, WHITE);
+	}
+
 };
 
 int main() {
@@ -223,6 +419,10 @@ int main() {
 	std::vector<projectile> projectiles;
 	std::optional<WorldStatePacket> world_buffer[3]{};
 	std::optional<double> time_buffer[3]{};
+	menu_option menu[4];
+	string menu_names[4] = {"Play","Change Shape", "Change Map", "Settings"};
+	for (int i = 0; i < 4; i++) menu[i].name = menu_names[i];
+	menu[0].selected = true;
 	map default_map(39, 39, 128, 6);
 	int max_view_x = default_map.width * default_map.scale / 2;
 	int max_view_y = default_map.width * default_map.scale / 2 / 16 * 9;
@@ -323,9 +523,9 @@ int main() {
 	InitWindow(win_width, win_height, "ceva game client");
 	SetTargetFPS(144);
 	RenderTexture2D canvas = LoadRenderTexture(virtualWidth, virtualHeight);
-
-	// 4. Force Point Filtering so your 128x128 pixel art stays perfectly crisp when scaled
 	SetTextureFilter(canvas.texture, TEXTURE_FILTER_POINT);
+	int players_waiting=0;
+	int my_result = 0;
 	while (active && !WindowShouldClose()) {
 		if (IsKeyDown(KEY_X)) {
 			active = false;
@@ -333,290 +533,217 @@ int main() {
 		}
 		int windowWidth = GetScreenWidth();
 		int windowHeight = GetScreenHeight();
-
-		
-
-		switch (current_state) {
-		case GameState::STATE_MENU: {
-			// Network maintenance loop (keep ENet alive silently in background)
-			while (enet_host_service(client, &event, 0) > 0) {
-				if (event.type == ENET_EVENT_TYPE_RECEIVE) {
-					// Cache the ID assignment if it arrives early
-					uint8_t packet_type = event.packet->data[0];
-					if (packet_type == static_cast<uint8_t>(PacketType::ID_ASSIGNMENT)) {
-						id_assign* id_received = reinterpret_cast<id_assign*>(event.packet->data);
-						my_id = id_received->id;
+		while (enet_host_service(client, &event, 0) > 0) {
+			switch (event.type) {
+			case ENET_EVENT_TYPE_RECEIVE: {
+				uint8_t packet_type = event.packet->data[0];
+				if (packet_type == static_cast<uint8_t>(PacketType::ID_ASSIGNMENT)) {
+					id_assign* id_received = reinterpret_cast<id_assign*>(event.packet->data);
+					my_id = id_received->id;
+					cout << "Server assigned me Player ID: " << id_received->id << std::flush;
+				}
+				else if (packet_type == static_cast<uint8_t>(PacketType::WORLD_STATE)) {
+					if (event.packet->dataLength < 3) {
+						enet_packet_destroy(event.packet);
+						break;
 					}
+
+					WorldStatePacket incoming_world{};
+					uint8_t server_players = event.packet->data[1];
+					uint8_t server_projectiles = event.packet->data[2];
+					uint8_t ammo = event.packet->data[3];
+					size_t expected_bytes = 4
+						+ (server_players * sizeof(PlayerNetworkState))
+						+ (server_projectiles * sizeof(projectile_network));
+					if (event.packet->dataLength < expected_bytes) {
+						std::cout << "Warning: Truncated packet dropped! Expected "
+							<< expected_bytes << ", got " << event.packet->dataLength << "\n";
+						enet_packet_destroy(event.packet);
+						break;
+					}
+					incoming_world.packet_type = event.packet->data[0];
+					incoming_world.active_player_count = server_players;
+					incoming_world.projectile_count = server_projectiles;
+					incoming_world.ammo = ammo;
+					uint8_t* payload_src = event.packet->data + 4;
+					for (int i = 0; i < incoming_world.active_player_count && i < MAX_PLAYERS; i++) {
+						std::memcpy(&incoming_world.players[i], payload_src, sizeof(PlayerNetworkState));
+						payload_src += sizeof(PlayerNetworkState);
+						uint8_t p_id = incoming_world.players[i].id;
+						if (p_id < players.size()) {
+							players[p_id].id = p_id;
+							players[p_id].health = incoming_world.players[i].health;
+							players[p_id].active = incoming_world.players[i].active;
+							if (p_id == my_id) {
+								players[p_id].pos_x = incoming_world.players[i].pos_x;
+								players[p_id].pos_y = incoming_world.players[i].pos_y;
+							}
+
+						}
+					}
+					for (int i = 0; i < incoming_world.projectile_count && i < MAX_PROJECTILES; i++) {
+						std::memcpy(&incoming_world.projectiles[i], payload_src, sizeof(projectile_network));
+						payload_src += sizeof(projectile_network);
+					}
+
+					world_buffer[1] = world_buffer[2];
+					time_buffer[1] = time_buffer[2];
+					world_buffer[2] = incoming_world;
+					time_buffer[2] = GetTime();
+				}
+				else if (packet_type == static_cast<uint8_t>(PacketType::MATCH_STATE_CHANGE)) {
+					MatchStatePacket* state_pkt = reinterpret_cast<MatchStatePacket*>(event.packet->data);
+					if (state_pkt->new_state == 1) {
+						current_state = GameState::STATE_PLAYING;
+					}
+					else if (state_pkt->new_state == 2) { 
+						current_state = GameState::STATE_GAME_OVER;
+						my_result = event.packet->data[2];
+					}
+					else if (state_pkt->new_state == 0) {
+						current_state = GameState::STATE_MENU;
+					}
+				}
+				else if (packet_type == static_cast<uint8_t>(PacketType::LOBBY_COUNT)) {
+					players_waiting = event.packet->data[1];
 				}
 				enet_packet_destroy(event.packet);
+				break;
+			}
+			case ENET_EVENT_TYPE_DISCONNECT: {
+				std::cout << "The server disconnected or kicked you." << std::endl;
+				break;
 			}
 
+			default:
+				break;
+			}
+		}
+		switch (current_state) {
+		case GameState::STATE_MENU: {
 			BeginDrawing();
 			ClearBackground(DARKBLUE);
-			DrawText("ARENA BRAWLER 2D/3D", windowWidth / 2 - 180, windowHeight / 3, 30, YELLOW);
-			DrawText("PRESS [ENTER] TO JOIN MATCH", windowWidth / 2 - 150, windowHeight / 2, 20, RAYWHITE);
+			int text_width = MeasureText("Geomatrix", 50);
+			bool selected = false;
+			int option = -1;
+			DrawText("Geomatrix", windowWidth / 2 - text_width/2, windowHeight / 3, 50, YELLOW);
+			for (int i = 0; i < 4; i++) {
+				button button(windowWidth / 2-125, windowHeight / 2 + 30 * i,250,25, menu[i].name.c_str(), 20);
+				Vector2 mousePos = GetMousePosition();
+				button.Draw(mousePos, menu[i].selected);
+				if (button.IsPressed(mousePos)) {
+					selected = true;
+					option = i;
+				}
+			}
+			if (IsKeyPressed(KEY_DOWN)) {
+				for (int i = 0; i < 4; i++) {
+					if (menu[i].selected) {
+						menu[i].selected = false;
+						if (i+1 < 4) {
+							menu[i+1].selected = true;
+						}
+						else {
+							menu[0].selected = true;
+						}
+						break;
+					}
+				}
+			}
+			if (IsKeyPressed(KEY_UP)) {
+				for (int i = 0; i < 4; i++) {
+					if (menu[i].selected) {
+						menu[i].selected = false;
+						if (i-1 >=0) {
+							menu[i-1].selected = true;
+						}
+						else {
+							menu[3].selected = true;
+						}
+						break;
+					}
+				}
+			}
+
 			EndDrawing();
-
 			if (IsKeyPressed(KEY_ENTER)) {
-				current_state = GameState::STATE_PLAYING;
-			}
-
-			break;
-		}
-
-		case GameState::STATE_PLAYING: {
-			player_input input = movement_float(IsGamepadAvailable(0));
-			if (my_id != -1) {
-				SendInputToServer(peer, input);
-			}
-			while (enet_host_service(client, &event, 0) > 0) {
-				switch (event.type) {
-				case ENET_EVENT_TYPE_RECEIVE: {
-					uint8_t packet_type = event.packet->data[0];
-					if (packet_type == static_cast<uint8_t>(PacketType::ID_ASSIGNMENT)) {
-						id_assign* id_received = reinterpret_cast<id_assign*>(event.packet->data);
-						my_id = id_received->id;
-						cout << "Server assigned me Player ID: " << id_received->id << std::flush;
+				for (int i = 0; i < 4; i++) {
+					if (menu[i].selected) {
+						option = i;
+						selected = true;
 					}
-					else if (packet_type == static_cast<uint8_t>(PacketType::WORLD_STATE)) {
-						if (event.packet->dataLength < 3) {
-							enet_packet_destroy(event.packet);
-							break;
-						}
-
-						WorldStatePacket incoming_world{};
-						uint8_t server_players = event.packet->data[1];
-						uint8_t server_projectiles = event.packet->data[2];
-						size_t expected_bytes = 3
-							+ (server_players * sizeof(PlayerNetworkState))
-							+ (server_projectiles * sizeof(projectile_network));
-						if (event.packet->dataLength < expected_bytes) {
-							std::cout << "Warning: Truncated packet dropped! Expected "
-								<< expected_bytes << ", got " << event.packet->dataLength << "\n";
-							enet_packet_destroy(event.packet);
-							break;
-						}
-						incoming_world.packet_type = event.packet->data[0];
-						incoming_world.active_player_count = server_players;
-						incoming_world.projectile_count = server_projectiles;
-						uint8_t* payload_src = event.packet->data + 3;
-						for (int i = 0; i < incoming_world.active_player_count && i < MAX_PLAYERS; i++) {
-							std::memcpy(&incoming_world.players[i], payload_src, sizeof(PlayerNetworkState));
-							payload_src += sizeof(PlayerNetworkState);
-
-							uint8_t p_id = incoming_world.players[i].id;
-							if (p_id < players.size()) {
-								players[p_id].id = p_id;
-								players[p_id].health = incoming_world.players[i].health;
-								players[p_id].active = incoming_world.players[i].active;
-								if (p_id == my_id) {
-									players[p_id].pos_x = incoming_world.players[i].pos_x;
-									players[p_id].pos_y = incoming_world.players[i].pos_y;
-								}
-
-							}
-						}
-						for (int i = 0; i < incoming_world.projectile_count && i < MAX_PROJECTILES; i++) {
-							std::memcpy(&incoming_world.projectiles[i], payload_src, sizeof(projectile_network));
-							payload_src += sizeof(projectile_network);
-						}
-
-						world_buffer[1] = world_buffer[2];
-						time_buffer[1] = time_buffer[2];
-						world_buffer[2] = incoming_world;
-						time_buffer[2] = GetTime();
-					}
-					enet_packet_destroy(event.packet);
+				}
+			}
+			if (selected) {
+				switch (option) {
+				case 0: {
+					current_state = GameState::STATE_lobby;
+					pressed_play play;
+					ENetPacket* packet = enet_packet_create(&play, sizeof(pressed_play), ENET_PACKET_FLAG_RELIABLE);
+					enet_peer_send(peer, 0, packet);
 					break;
 				}
-				case ENET_EVENT_TYPE_DISCONNECT: {
-					std::cout << "The server disconnected or kicked you." << std::endl;
+				case 1: {
 					break;
 				}
-
+				case 2: {
+					break;
+				}
+				case 3: {
+					break;
+				}
 				default:
 					break;
 				}
 			}
 
-			float scale = fminf((float)windowWidth / virtualWidth, (float)windowHeight / virtualHeight);
-
-			float targetWidth = virtualWidth * scale;
-			float targetHeight = virtualHeight * scale;
-
-			float offsetX = (windowWidth - targetWidth) / 2.0f;
-			float offsetY = (windowHeight - targetHeight) / 2.0f;
-
-
-
-			BeginTextureMode(canvas);
-			ClearBackground(BLACK);
-			float current_client_time = GetTime();
-
-			float render_time = current_client_time - 2.0f / 69.0f;
-			WorldStatePacket* world_1 = nullptr;
-			WorldStatePacket* world_2 = nullptr;
-			if (world_buffer[1].has_value()) {
-				world_1 = &world_buffer[1].value();
-				world_2 = &world_buffer[2].value();
-			}
-
-			if (world_1 && world_2 && my_id != -1 && players[my_id].active) {
-				DrawText(TextFormat("%d", world_1->active_player_count), 10, 20, 10, GREEN);
-				float time_between_packets = time_buffer[2].value() - time_buffer[1].value();
-				float elapsed_time = render_time - time_buffer[1].value();
-				float t = (time_between_packets > 0.0f) ? (elapsed_time / time_between_packets) : 1.0f;
-				t = std::clamp(t, 0.0f, 1.0f);
-				for (auto& pl : players) {
-					pl.active = false;
-				}
-				for (int i = 0; i < world_1->active_player_count; i++) {
-					DrawText(TextFormat("%d", world_1->players[i].id), 20 + 10 * i, 30, 10, GREEN);
-					auto& p1 = world_1->players[i];
-					uint8_t p_id = static_cast<uint8_t>(p1.id);
-
-					if (p_id >= players.size()) continue;
-					players[p_id].active = true;
-					players[p_id].health = p1.health;
-					int w2_index = -1;
-					for (int j = 0; j < world_2->active_player_count; j++) {
-						if (world_2->players[j].id == p_id) {
-							w2_index = j;
-							break;
-						}
-					}
-
-					if (w2_index != -1) {
-						auto& p2 = world_2->players[w2_index];
-						players[p_id].pos_f_x = p1.pos_x + (p2.pos_x - p1.pos_x) * t;
-						players[p_id].pos_f_y = p1.pos_y + (p2.pos_y - p1.pos_y) * t;
-					}
-					else {
-						players[p_id].pos_f_x = p1.pos_x;
-						players[p_id].pos_f_y = p1.pos_y;
-					}
-
-					players[p_id].pos_x = static_cast<int>(players[p_id].pos_f_x);
-					players[p_id].pos_y = static_cast<int>(players[p_id].pos_f_y);
-
-				}
-				int my_screen_x = players[my_id].pos_x;
-				int my_screen_y = players[my_id].pos_y;
-				int cam_offset_x = my_screen_x - max_view_x;
-				int cam_offset_y = my_screen_y - max_view_y;
-				int max_cam_x = (default_map.width * default_map.scale) - (2 * max_view_x);
-				int max_cam_y = (default_map.height * default_map.scale) - (2 * max_view_y);
-
-				cam_offset_x = std::clamp(cam_offset_x, 0, max_cam_x);
-				cam_offset_y = std::clamp(cam_offset_y, 0, max_cam_y);
-
-				for (int y = 0; y < default_map.height; ++y) {
-					for (int x = 0; x < default_map.width; ++x) {
-						Color tileColor = GetCellColor(default_map.matrix[y][x]);
-
-						int tile_draw_x = (x * default_map.scale) - cam_offset_x;
-						int tile_draw_y = (y * default_map.scale) - cam_offset_y;
-
-						// Only draw if the tile is actually visible on screen
-						if (tile_draw_x >= -default_map.scale && tile_draw_x <= virtualWidth &&
-							tile_draw_y >= -default_map.scale && tile_draw_y <= virtualHeight) {
-							DrawRectangle(tile_draw_x, tile_draw_y, default_map.scale, default_map.scale, tileColor);
-						}
-					}
-				}
-
-				for (int i = 0; i < world_1->active_player_count; i++) {
-					auto& p1 = world_1->players[i];
-					uint8_t p_id = static_cast<uint8_t>(p1.id);
-					if (p_id >= players.size() || !players[p_id].active) continue;
-
-					int final_draw_x = players[p_id].pos_x - cam_offset_x - (pl_width / 2);
-					int final_draw_y = players[p_id].pos_y - cam_offset_y - (pl_width / 2);
-
-					int team_idx = (p_id < players.size() / 2) ? 0 : 1;
-					DrawRectangle(final_draw_x, final_draw_y, pl_width, pl_width, pl_colors_team[team_idx]);
-					DrawText(TextFormat("%d", players[p_id].health), final_draw_x, final_draw_y - 96, 64, GREEN);
-				}
-
-				for (int i = 0; i < world_1->projectile_count; i++) {
-					auto& proj1 = world_1->projectiles[i];
-					uint8_t target_p_id = proj1.id;
-					int w2_index = -1;
-					for (int j = 0; j < world_2->projectile_count; j++) {
-						if (world_2->projectiles[j].id == target_p_id) {
-							w2_index = j;
-							break;
-						}
-					}
-					float proj_screen_f_x = 0.0f;
-					float proj_screen_f_y = 0.0f;
-
-					if (w2_index != -1) {
-						auto& proj2 = world_2->projectiles[w2_index];
-						proj_screen_f_x = proj1.pos_x + t * (proj2.pos_x - proj1.pos_x);
-						proj_screen_f_y = proj1.pos_y + t * (proj2.pos_y - proj1.pos_y);
-					}
-					else {
-						proj_screen_f_x = proj1.pos_x;
-						proj_screen_f_y = proj1.pos_y;
-					}
-					int proj_screen_x = static_cast<int>(proj_screen_f_x);
-					int proj_screen_y = static_cast<int>(proj_screen_f_y);
-					int final_proj_x = proj_screen_x - cam_offset_x - (proj1.radius / 2);
-					int final_proj_y = proj_screen_y - cam_offset_y - (proj1.radius / 2);
-					DrawCircle(final_proj_x, final_proj_y, proj1.radius, Color{ 155, 93, 229, 255 });
-
-				}
-			}
-			else {
-				DrawText("CONNECTING TO SERVER...", windowWidth / 2 - 140, windowHeight / 2 - 10, 20, RAYWHITE);
-			}
-			EndTextureMode();
+			break;
+		}
+		case GameState::STATE_lobby: {
 			BeginDrawing();
-			ClearBackground(BLACK); // Clear physical screen background (colors the letterboxes)
-
-			// Source rectangle: Grabs the entire virtual canvas texture
-			// Note: Raylib render textures are inverted vertically on the GPU, 
-			// so we use a negative height to flip it right-side up.
-			Rectangle sourceRec = { 0.0f, 0.0f, (float)virtualWidth, -(float)virtualHeight };
-
-			// Destination rectangle: Where it gets drawn on the physical screen
-			Rectangle destRec = { offsetX, offsetY, targetWidth, targetHeight };
-
-			// Vector2 origin: Top-left corner of the target rectangle
-			Vector2 origin = { 0.0f, 0.0f };
-
-			// Draw the high-precision canvas scaled perfectly onto the physical window
-			DrawTexturePro(canvas.texture, sourceRec, destRec, origin, 0.0f, WHITE);
-
-			// Draw your localized UI / Debug FPS overlay directly over the final window screen
-			DrawFPS(10, 10);
-
-			EndDrawing();
-
-
-			if (my_id != -1 && !players[my_id].active) {
-				current_state = GameState::STATE_GAME_OVER;
+			ClearBackground(DARKBLUE);
+			if (IsKeyDown(KEY_B)) {
+				force_connect ceva;
+				ENetPacket* packet = enet_packet_create(&ceva, sizeof(force_connect), ENET_PACKET_FLAG_RELIABLE);
+				enet_peer_send(peer, 0, packet);
 			}
+			DrawText("Waiting for players", windowWidth / 2 - 180, windowHeight / 3, 30, YELLOW);
+			DrawText(TextFormat("%d / %d", players_waiting, default_map.pl_nr), windowWidth / 2 - 150, windowHeight / 2, 20, RAYWHITE);
+			EndDrawing();
+			break;
+		}
+		case GameState::STATE_PLAYING: {
+			player_input input = movement_float(IsGamepadAvailable(0));
+			if (my_id != -1) {
+				SendInputToServer(peer, input);
+			}
+				match_drawing(world_buffer, time_buffer, players, default_map, canvas, my_id, virtualWidth, virtualHeight, max_view_x, max_view_y,windowWidth,windowHeight);
 			break;
 		}
 		case GameState::STATE_GAME_OVER: {
-			while (enet_host_service(client, &event, 0) > 0) { enet_packet_destroy(event.packet); }
-
+			while (enet_host_service(client, &event, 0) > 0) { 
+				enet_packet_destroy(event.packet); 
+			}
+			for (int i = 0; i < default_map.pl_pos.size(); i++) {
+				player pl_temp(1000, "Player" + std::to_string(i), default_map.pl_pos[i][1], default_map.pl_pos[i][0], i);
+				pl_temp.active = true;
+				players.push_back(pl_temp);
+			}
+			projectiles.clear();
 			BeginDrawing();
 			ClearBackground(MAROON);
-			DrawText("YOU WERE ELIMINATED", windowWidth / 2 - 160, windowHeight / 3, 30, WHITE);
+			DrawText("GAME OVER!", windowWidth / 2 - 160, windowHeight / 3, 30, WHITE);
+			DrawText(TextFormat("Your rank: %d", my_result), windowWidth / 2 - 160, windowHeight / 2.5, 30, WHITE);
 			DrawText("PRESS [ENTER] TO RETURN TO MENU", windowWidth / 2 - 160, windowHeight / 2, 18, GRAY);
 			EndDrawing();
-
 			if (IsKeyPressed(KEY_ENTER)) {
 				current_state = GameState::STATE_MENU;
 			}
 			break;
-
 		}
 		}
 	}
+	UnloadRenderTexture(canvas);
 	CloseWindow();
 	return 0;
 }
