@@ -7,11 +7,21 @@ using std::string;
 #pragma pack(push, 1)
 #define MAX_PLAYERS 10
 #define MAX_PROJECTILES 100
+#define PACKET_SIZE 884
 enum class PacketType : uint8_t {
 	ID_ASSIGNMENT = 0,
-	WORLD_STATE = 1
+	WORLD_STATE = 1,
+	MATCH_STATE_CHANGE = 2,
+	LOBBY_COUNT = 3,
+	FORCE_CONNECT = 4,
+	press_play=5,
+	input =6
 };
-
+struct MatchStatePacket {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::MATCH_STATE_CHANGE);
+	uint8_t new_state;
+	uint8_t position;
+};
 
 struct PlayerNetworkState {
 	uint16_t pos_x{};
@@ -27,21 +37,44 @@ struct projectile_network {
 	uint16_t id{};
 };
 struct WorldStatePacket {
-	uint8_t packet_type = static_cast<uint8_t>(PacketType::WORLD_STATE); 
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::WORLD_STATE);
 	uint8_t active_player_count{};
 	uint8_t projectile_count{};
+	uint8_t ammo{};
 	PlayerNetworkState players[MAX_PLAYERS];
 	projectile_network projectiles[MAX_PROJECTILES];
 
 };
 struct id_assign {
-	uint8_t packet_type = static_cast<uint8_t>(PacketType::ID_ASSIGNMENT); 
-	uint8_t id;
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::ID_ASSIGNMENT);
+	uint8_t id{};
+};
+struct force_connect {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::FORCE_CONNECT);
+};
+struct lobby_count {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::LOBBY_COUNT);
+	uint8_t count{};
+};
+struct pressed_play {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::press_play);
+};
+struct player_input {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::input);
+	float x{};
+	float y{};
+	bool attack{};
+	float aim_x{};
+	float aim_y{};
 };
 #pragma pack(pop)
 
 //network stuff end
-
+enum class ServerState {
+	LOBBY,               
+	MATCH_IN_PROGRESS,  
+	GAME_OVER            
+};
 struct map {
 	int height{};
 	int width{};
@@ -63,9 +96,10 @@ struct player {
 	int health{};
 	string name;
 	int ammo{};
+	int ammo_now{};
 	float reload_time{};
-	long long reload_time_start{};
-	long long reload_time_now{};
+	float reload_timer{};
+	float shoot_delay{};
 	int range{};
 	int ammo_r{};
 	int ammo_speed{};
@@ -85,22 +119,6 @@ struct player {
 	bool active = true;
 	bool connected = false;
 	ENetPeer* peer{ nullptr };
-	player(int h, string name, int x, int y, int range, int s, int a_r, int a_speed,int id, int a_d) :
-		health(h),
-		id(id),
-		name(name),
-		pos_x(x),
-		pos_y(y),
-		new_x(x),
-		new_y(y),
-		pos_f_x(static_cast<int>(x)),
-		pos_f_y(static_cast<int>(y)),
-		range(range),
-		speed(s),
-		ammo_r(a_r),
-		ammo_speed(a_speed),
-		ammo_damage(a_d)
-	{}
 };
 struct projectile {
 	int id{};
@@ -126,13 +144,7 @@ struct projectile {
 	{}
 };
 
-struct player_input {
-	float x{};
-	float y{};
-	bool attack{};
-	float aim_x{};
-	float aim_y{};
-};
+
 
 bool collision(map& map, int& new_x, int& new_y) {
 	int corners_x[4] = { new_x - pl_width / 2, new_x + pl_width / 2 - 1, new_x - pl_width / 2, new_x + pl_width / 2 - 1 };
@@ -152,7 +164,7 @@ bool collision(map& map, int& new_x, int& new_y) {
 	}
 	return true;
 }
-bool aim(map& map, std::vector<player>& players, projectile& pr, float d_time) {
+bool aim(map& map, player(&players)[MAX_PLAYERS], projectile& pr, float d_time) {
 	float lengthSq = pr.aim_x * pr.aim_x + pr.aim_y * pr.aim_y;
 	float distance_min = pl_width / 2 + pr.radius;
 	if (lengthSq > 1.0f) {
@@ -177,7 +189,7 @@ bool aim(map& map, std::vector<player>& players, projectile& pr, float d_time) {
 	pr.distance += std::sqrt(pow(pr.new_x - pr.pos_x, 2) + pow(pr.new_y - pr.pos_y, 2));
 	pr.pos_x = pr.new_x;
 	pr.pos_y = pr.new_y;
-	for (int i = 0; i < players.size(); i++) {
+	for (int i = 0; i < map.pl_nr; i++) {
 		if ((pr.id != i)&&players[i].active) {
 			if ((abs(players[i].pos_x - pr.pos_x) <= distance_min) &&(abs(players[i].pos_y - pr.pos_y) <= distance_min)) {
 				players[i].health -= pr.damage;
@@ -225,7 +237,7 @@ void movement_float(map& map, player& pl, double d_time) {
 
 int main() {
 	bool active = true;
-	std::vector<player> players;
+	player players[MAX_PLAYERS];
 	std::vector<projectile> projectiles;
 	map default_map(39, 39,128,6);
 	int max_view_x = default_map.width * default_map.scale / 2;
@@ -280,12 +292,25 @@ int main() {
 		{34 * default_map.scale + default_map.scale/2, 21 * default_map.scale + default_map.scale/2},
 	};
 	for (int i = 0; i < default_map.pl_pos.size(); i++) {
-		player pl_temp(1000, "Player" + std::to_string(i), default_map.pl_pos[i][1], default_map.pl_pos[i][0], 960,640, 26,960,i, 100);
-		pl_temp.reload_time = 1;	
-		pl_temp.ammo = 3;
+		player pl_temp;
+		pl_temp.health = 1000;
+		pl_temp.name = "Player "+std::to_string(i);
+		pl_temp.pos_x = default_map.pl_pos[i][1];
+		pl_temp.pos_y = default_map.pl_pos[i][0];
+		pl_temp.range = 960;
+		pl_temp.ammo_damage = 100;
+		pl_temp.ammo_speed = 960;
+		pl_temp.speed = 640;
+		pl_temp.ammo_r = 26;
+		pl_temp.id = i;
+		pl_temp.reload_time = 0.69;
+		pl_temp.reload_timer = 0.0;
+		pl_temp.shoot_delay = 0.0;
+		pl_temp.ammo = 6;
+		pl_temp.ammo_now = 6;
 		pl_temp.active = true;
 		pl_temp.peer = nullptr;
-		players.push_back(pl_temp);
+		players[i] = pl_temp;
 	}
 	if (enet_initialize() != 0) {
 		std::cerr << "An error occurred while initializing ENet.\n";
@@ -309,67 +334,83 @@ int main() {
 	double accumulated_time = 0;
 	auto last_time = std::chrono::high_resolution_clock::now();
 	int projectile_ids = 0;
+	int connected_count = 0;
+	ServerState current_state = ServerState::LOBBY;
 	while (active) {
+		bool connect_anyway=false;
 		while (enet_host_service(server, &event, 0) > 0) {
 			switch (event.type) {
 			case ENET_EVENT_TYPE_CONNECT: {
 				cout << "A new client connected from "
 					<< (*event.peer).address.host << ":"
 					<< event.peer->address.port << "\n";
-				
-				for (int i = 0; i < players.size(); i++) {
-					if (!players[i].connected) {
-						players[i].connected = true;
-						players[i].peer = event.peer; 
-						players[i].id = i;
-						event.peer->data = reinterpret_cast<void*>(static_cast<uintptr_t>(i));
-						id_assign id_sent;
-						id_sent.id = i;
-						ENetPacket* packet = enet_packet_create(&id_sent, sizeof(id_assign), 0);
-						enet_peer_send(event.peer, 0, packet);
-						break;
-					}
-				}
-				
 				break;
 			}
-			case ENET_EVENT_TYPE_RECEIVE:
-				if (event.packet->dataLength == sizeof(player_input)) {
-					player_input* received_input = (player_input*)event.packet->data;
-					uintptr_t target_id = (uintptr_t)event.peer->data;
-					for (auto& pl : players) {
-						if (pl.id == target_id) {
-							pl.joy_x = received_input->x;
-							pl.joy_y = received_input->y;
-							pl.attack = received_input->attack;
-							if (received_input->attack) {
-								pl.aim_x =received_input->aim_x;
-								pl.aim_y = received_input->aim_y;
+			case ENET_EVENT_TYPE_RECEIVE: {
+				uint8_t packet_type = event.packet->data[0];
+				if (packet_type == static_cast<uint8_t>(PacketType::input)) {
+					if (event.packet->dataLength == sizeof(player_input)) {
+						player_input* received_input = (player_input*)event.packet->data;
+						uintptr_t target_id = (uintptr_t)event.peer->data;
+						for (auto& pl : players) {
+							if (pl.id == target_id) {
+								pl.joy_x = received_input->x;
+								pl.joy_y = received_input->y;
+								pl.attack = received_input->attack;
+								if ((received_input->attack) && ((received_input->aim_x != 0.0) || (received_input->aim_y != 0.0))) {
+									pl.aim_x = received_input->aim_x;
+									pl.aim_y = received_input->aim_y;
+								}
+								else {
+									pl.aim_x = 0;
+									pl.aim_y = 0;
+								}
+								break;
 							}
-							else {
-								pl.aim_x = 0;
-								pl.aim_y = 0;
-							}
+						}
+					}
+					else {
+						std::cerr << "Received a malformed input packet of unexpected size.\n";
+					}
+				}
+				else if (packet_type == static_cast<uint8_t>(PacketType::FORCE_CONNECT)) {
+					connect_anyway = true;
+				}
+				else if (packet_type == static_cast<uint8_t>(PacketType::press_play)) {
+					for (int i = 0; i < default_map.pl_nr; i++) {
+						if (!players[i].connected) {
+							players[i].connected = true;
+							players[i].active = true;
+							players[i].peer = event.peer;
+							players[i].id = i;
+							event.peer->data = reinterpret_cast<void*>(static_cast<uintptr_t>(i));
+							id_assign id_sent;
+							id_sent.id = i;
+							ENetPacket* packet = enet_packet_create(&id_sent, sizeof(id_assign), 0);
+							enet_peer_send(event.peer, 0, packet);
+							cout << "Player " << i << " joined the lobby." << std::endl;
 							break;
 						}
 					}
 				}
-				else {
-					std::cerr << "Received a malformed packet of unexpected size.\n";
-				}
 				enet_packet_destroy(event.packet);
 				break;
-
+			}
 			case ENET_EVENT_TYPE_DISCONNECT: {
 				if (event.peer->data != nullptr) {
 					uintptr_t disconnected_player = reinterpret_cast<uintptr_t>(event.peer->data);
 					cout << "Player " << disconnected_player << " disconnected." << std::endl;
-					for (auto it = players.begin(); it != players.end(); ++it) {
-						if (it->peer == players[disconnected_player].peer) {
-							players.erase(it);
+					for (int i = 0; i < default_map.pl_nr;i++) {
+						if (players[i].peer == players[disconnected_player].peer) {
+							players[i].connected=false;
+							players[i].peer = nullptr;
+							connected_count--;
 							break; 
 						}
 					}
+				}
+				if ((connected_count == 0)&&(current_state==ServerState::MATCH_IN_PROGRESS)) {
+					current_state = ServerState::GAME_OVER;
 				}
 				break;
 			}
@@ -383,105 +424,244 @@ int main() {
 		last_time = current_time;
 		accumulated_time += elapsed.count();
 		while (accumulated_time >= tick_time){	
-			for (int i = 0; i < players.size(); i++) {
-				if ((players[i].connected)&& (players[i].active)) {
-					movement_float(default_map, players[i], tick_time);
-					if ((players[i].attack) && (projectiles.size() < MAX_PROJECTILES)) {
-						projectile pr(players[i].ammo_r, players[i].ammo_speed, players[i].range, players[i].ammo_damage);
-						pr.pos_x = players[i].pos_x;
-						pr.pos_y = players[i].pos_y;
-						pr.pos_f_x = static_cast<float>(players[i].pos_x);
-						pr.pos_f_y = static_cast<float>(players[i].pos_y);
-						pr.id = players[i].id;
-						pr.pr_id = projectile_ids;
-						pr.aim_x = players[i].aim_x;
-						pr.aim_y = players[i].aim_y;
-						pr.distance = 0;
-						projectile_ids++;
-						projectiles.push_back(pr);
-						players[i].attack = false;
+			if (current_state == ServerState::LOBBY) {
+				int connected_d = 0;
+				for (const player& pl : players) {
+					if (pl.connected) connected_d++;
+				}
+				if (connected_d != connected_count) {
+					lobby_count count;
+					count.count = connected_count+1;
+					ENetPacket* count_pack = enet_packet_create(&count, sizeof(lobby_count), ENET_PACKET_FLAG_RELIABLE);
+					enet_host_broadcast(server, 0, count_pack);
+					connected_count = connected_d;
+				}
+				if ((connected_count == 6)||(connect_anyway)) {
+					current_state = ServerState::MATCH_IN_PROGRESS;
+
+					MatchStatePacket state_pkt{ .new_state = static_cast<uint8_t>(ServerState::MATCH_IN_PROGRESS) };
+					ENetPacket* packet = enet_packet_create(&state_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+					enet_host_broadcast(server, 0, packet);
+					cout << "Match automatically started with " << connected_count << " players!\n";
+				}
+			}
+			else if (current_state == ServerState::MATCH_IN_PROGRESS) {
+				for (int i = 0; i < default_map.pl_nr; i++) {
+					if ((players[i].connected) && (players[i].active)) {
+						movement_float(default_map, players[i], tick_time);
+						if (players[i].ammo_now < players[i].ammo) {
+							players[i].reload_timer -= tick_time;
+							if (players[i].shoot_delay > 0.0) {
+								players[i].shoot_delay -= tick_time;
+								if (players[i].shoot_delay <= 0.0) {
+									players[i].shoot_delay = 0.0;
+								}
+							}
+							if (players[i].reload_timer <= 0) {
+								players[i].ammo_now++;
+								players[i].reload_timer = 0.0;
+								if (players[i].ammo_now < players[i].ammo) {
+									players[i].reload_timer = players[i].reload_time;
+								}
+							}
+						}
+
+						if ((players[i].attack) && (projectiles.size() < MAX_PROJECTILES) &&
+							(players[i].ammo_now > 0) &&
+							((players[i].aim_x != 0.0) || (players[i].aim_y != 0.0)) &&
+							(players[i].shoot_delay == 0.0)) {
+							projectile pr(players[i].ammo_r, players[i].ammo_speed, players[i].range, players[i].ammo_damage);
+							pr.pos_x = players[i].pos_x;
+							pr.pos_y = players[i].pos_y;
+							pr.pos_f_x = static_cast<float>(players[i].pos_x);
+							pr.pos_f_y = static_cast<float>(players[i].pos_y);
+							pr.id = players[i].id;
+							pr.pr_id = projectile_ids;
+							pr.aim_x = players[i].aim_x;
+							pr.aim_y = players[i].aim_y;
+							pr.distance = 0;
+							projectile_ids++;
+							projectiles.push_back(pr);
+							players[i].attack = false;
+							if (players[i].ammo_now == players[i].ammo) {
+								players[i].reload_timer = players[i].reload_time;
+							}
+							players[i].ammo_now--;
+							players[i].shoot_delay = 0.096;
+						}
 					}
 				}
-			}
-			auto it = projectiles.begin();
-			while (it != projectiles.end()) {
-				bool is_alive = aim(default_map, players, *it, tick_time);
-
-				if (!is_alive) {
-					it = projectiles.erase(it);
+				auto it = projectiles.begin();
+				while (it != projectiles.end()) {
+					bool is_alive = aim(default_map, players, *it, tick_time);
+					if (!is_alive) {
+						it = projectiles.erase(it);
+					}
+					else {
+						++it;
+					}
 				}
-				else {
-					++it; 
+				int alive_count = 0;
+				int last_alive_id = -1;
+				for (int i = 0; i < default_map.pl_nr; i++) {
+					if (players[i].active&& players[i].health > 0) {
+						alive_count++;
+						last_alive_id = players[i].id;
+					}
 				}
-			}
-			for (int i = 0; i < players.size(); i++) {
-				if ((players[i].connected) && (players[i].active)) {
+				for (int i = 0; i < default_map.pl_nr; i++) {
 					if (players[i].health <= 0) {
-						players[i].active = false;
+						if (players[i].connected) {
+							cout << "Sending packet to Player " << players[i].id << " with rank " << (alive_count + 1) << std::endl;
+							MatchStatePacket win_pkt{
+								.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
+								.position = static_cast<uint8_t>(alive_count+1)
+							};
+							ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+							enet_peer_send(players[i].peer, 0, packet);
+							players[i].connected = false;
+						}
 						continue;
 					}
+				}
+				if (alive_count <= 1) {
+					current_state = ServerState::GAME_OVER;
+					MatchStatePacket win_pkt{
+								.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
+								.position = 1
+					};
+					ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+					enet_peer_send(players[last_alive_id].peer, 0, packet);
+					cout << "Game Over! Player " << last_alive_id << " wins the match.\n";
+				}
 
-					WorldStatePacket client_packet = { 0 };
-					client_packet.packet_type = static_cast<uint8_t>(PacketType::WORLD_STATE);
-					client_packet.active_player_count = 0;
-					player* pl = &players[i];
-					for (int j = 0; j < players.size(); j++) {
-						if ((players[j].id != pl->id) && (players[j].active)) {
-							int distance_x = abs(players[j].pos_x - pl->pos_x);
-							int distance_y = abs(players[j].pos_y - pl->pos_y);
+				for (int i = 0; i < default_map.pl_nr; i++) {
+					if ((players[i].connected) && (players[i].active)) {
+						player* pl = &players[i];
+						uint8_t send_buffer[PACKET_SIZE];
+
+						send_buffer[0] = static_cast<uint8_t>(PacketType::WORLD_STATE);
+						send_buffer[1] = 0;
+						send_buffer[2] = 0;
+						send_buffer[3] = pl->ammo_now;
+						uint8_t* payload_dst = send_buffer + 4;
+
+
+						for (int j = 0; j < default_map.pl_nr; j++) {
+							if (players[j].active) {
+								int distance_x = abs(players[j].pos_x - pl->pos_x);
+								int distance_y = abs(players[j].pos_y - pl->pos_y);
+								int view_y = max_view_y;
+								if (pl->pos_y - max_view_y < 0) {
+									view_y -= pl->pos_y - max_view_y;
+								}
+								else if (pl->pos_y + max_view_y > default_map.height * default_map.scale) {
+									view_y += pl->pos_y + max_view_y - default_map.height * default_map.scale;
+								}
+								int view_x = max_view_x;
+								if (pl->pos_x - max_view_x < 0) {
+									view_x -= pl->pos_x - max_view_x;
+								}
+								else if (pl->pos_x + max_view_x > default_map.width * default_map.scale) {
+									view_x += pl->pos_x + max_view_x - default_map.width * default_map.scale;
+								}
+								if ((distance_x <= view_x) && (distance_y <= view_y)) {
+									PlayerNetworkState p_state{
+										.pos_x = static_cast<uint16_t>(players[j].pos_x),
+										.pos_y = static_cast<uint16_t>(players[j].pos_y),
+										.health = static_cast<uint16_t>(players[j].health),
+										.id = static_cast<uint8_t>(players[j].id),
+										.active = players[j].active
+									};
+									std::memcpy(payload_dst, &p_state, sizeof(PlayerNetworkState));
+
+									payload_dst += sizeof(PlayerNetworkState);
+									send_buffer[1]++;
+								}
+							}
+							else if (players[j].id == pl->id) {
+								PlayerNetworkState p_state{
+										.pos_x = static_cast<uint16_t>(players[j].pos_x),
+										.pos_y = static_cast<uint16_t>(players[j].pos_y),
+										.health = static_cast<uint16_t>(players[j].health),
+										.id = static_cast<uint8_t>(players[j].id),
+										.active = players[j].active
+								};
+								std::memcpy(payload_dst, &p_state, sizeof(PlayerNetworkState));
+								payload_dst += sizeof(PlayerNetworkState);
+								send_buffer[1]++;
+
+							}
+						}
+						auto it = projectiles.begin();
+						while (it != projectiles.end()) {
+							int distance_x = abs(it->pos_x - pl->pos_x);
+							int distance_y = abs(it->pos_y - pl->pos_y);
 							int view_y = max_view_y;
 							if (pl->pos_y - max_view_y < 0) {
 								view_y -= pl->pos_y - max_view_y;
-							}else if (pl->pos_y + max_view_y > default_map.height * default_map.scale) {
+							}
+							else if (pl->pos_y + max_view_y > default_map.height * default_map.scale) {
 								view_y += pl->pos_y + max_view_y - default_map.height * default_map.scale;
 							}
 							int view_x = max_view_x;
 							if (pl->pos_x - max_view_x < 0) {
 								view_x -= pl->pos_x - max_view_x;
-							}else if (pl->pos_x + max_view_x > default_map.width*default_map.scale) {
-								view_x += pl->pos_x + max_view_x- default_map.width * default_map.scale;
+							}
+							else if (pl->pos_x + max_view_x > default_map.width * default_map.scale) {
+								view_x += pl->pos_x + max_view_x - default_map.width * default_map.scale;
 							}
 							if ((distance_x <= view_x) && (distance_y <= view_y)) {
-								client_packet.players[client_packet.active_player_count].pos_x = static_cast<uint16_t>(players[j].pos_x);
-								client_packet.players[client_packet.active_player_count].pos_y = static_cast<uint16_t>(players[j].pos_y);
-								client_packet.players[client_packet.active_player_count].active = players[j].active;
-								client_packet.players[client_packet.active_player_count].health = static_cast<uint16_t>(players[j].health);
-								client_packet.players[client_packet.active_player_count].id = static_cast<uint16_t>(players[j].id);
-								client_packet.active_player_count++;
+								projectile_network pr_state{
+									.pos_x = static_cast<uint16_t>(it->pos_x),
+									.pos_y = static_cast<uint16_t>(it->pos_y),
+									.radius = static_cast<uint16_t>(it->radius),
+									.id = static_cast<uint16_t>(it->pr_id)
+								};
+								std::memcpy(payload_dst, &pr_state, sizeof(projectile_network));
+								payload_dst += sizeof(projectile_network);
+								send_buffer[2]++;
+
 							}
+							++it;
 						}
-						else if (players[j].id == pl->id) {
-							client_packet.players[client_packet.active_player_count].pos_x = static_cast<uint16_t>(players[j].pos_x);
-							client_packet.players[client_packet.active_player_count].pos_y = static_cast<uint16_t>(players[j].pos_y);
-							client_packet.players[client_packet.active_player_count].active = players[j].active;
-							client_packet.players[client_packet.active_player_count].id = static_cast<uint16_t>(players[j].id);
-							client_packet.players[client_packet.active_player_count].health = static_cast<uint16_t>(players[j].health);
-							client_packet.active_player_count++;
-						}
+						int dynamic_size = sizeof(uint8_t) * 4
+							+ (send_buffer[1] * sizeof(PlayerNetworkState))
+							+ (send_buffer[2] * sizeof(projectile_network));
+						ENetPacket* packet = enet_packet_create(&send_buffer, dynamic_size, 0);
+						enet_peer_send(players[i].peer, 0, packet);
 					}
-					client_packet.projectile_count = 0;
-					auto it = projectiles.begin();
-					while (it != projectiles.end()) {
-						int distance_x = abs(it->pos_x - pl->pos_x);
-						int distance_y = abs(it->pos_y - pl->pos_y);
-						if ((distance_x <= max_view_x) && (distance_y <= max_view_y)) {
-							client_packet.projectiles[client_packet.projectile_count].pos_x = static_cast<uint16_t>(it->pos_x);
-							client_packet.projectiles[client_packet.projectile_count].pos_y = static_cast<uint16_t> (it->pos_y);
-							client_packet.projectiles[client_packet.projectile_count].radius = static_cast<uint16_t>(it->radius);
-							client_packet.projectiles[client_packet.projectile_count].id = static_cast<uint16_t>(it->pr_id);
-							client_packet.projectile_count++;
-						}
-						++it; 
-					}			
-					int dynamic_size = sizeof(uint8_t) * 3 
-						+ (client_packet.active_player_count * sizeof(PlayerNetworkState))
-						+ (client_packet.projectile_count * sizeof(projectile_network));
-					ENetPacket* packet= enet_packet_create(&client_packet, dynamic_size, 0);
-					enet_peer_send(players[i].peer, 0, packet);
 				}
 			}
-			
-			
+			else if (current_state == ServerState::GAME_OVER) {
+				cout << "Resetting server playground back to Lobby state...\n";
+				projectiles.clear();
+
+				for (int i = 0; i < default_map.pl_pos.size(); i++) {
+					player pl_temp;
+					pl_temp.health = 1000;
+					pl_temp.name = "Player " + std::to_string(i);
+					pl_temp.pos_x = default_map.pl_pos[i][1];
+					pl_temp.pos_y = default_map.pl_pos[i][0];
+					pl_temp.range = 960;
+					pl_temp.ammo_damage = 100;
+					pl_temp.ammo_speed = 960;
+					pl_temp.speed = 640;
+					pl_temp.ammo_r = 26;
+					pl_temp.id = i;
+					pl_temp.reload_time = 0.69;
+					pl_temp.reload_timer = 0.0;
+					pl_temp.shoot_delay = 0.0;
+					pl_temp.ammo = 6;
+					pl_temp.ammo_now = 6;
+					pl_temp.active = true;
+					pl_temp.peer = nullptr;
+					players[i] = pl_temp;
+				}
+				connected_count = 0;
+				current_state = ServerState::LOBBY;
+				break;
+			}
 			accumulated_time -= tick_time;
 		}
 		double time_left = tick_time - accumulated_time;
