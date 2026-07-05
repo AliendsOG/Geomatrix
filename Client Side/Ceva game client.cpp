@@ -25,7 +25,9 @@ enum class PacketType : uint8_t {
 	FORCE_CONNECT = 4,
 	press_play = 5,
 	input = 6,
-	disconnect=7
+	disconnect=7,
+	select_map = 8,
+	select_shape = 9
 };
 struct MatchStatePacket {
 	uint8_t packet_type = static_cast<uint8_t>(PacketType::MATCH_STATE_CHANGE);
@@ -65,6 +67,10 @@ struct pressed_play {
 struct disconnect {
 	uint8_t packet_type = static_cast<uint8_t>(PacketType::disconnect);
 };
+struct map_select {
+	uint8_t packet_type = static_cast<uint8_t>(PacketType::select_map);
+	uint8_t map_id{};
+};
 struct player_input {
 	uint8_t packet_type = static_cast<uint8_t>(PacketType::input);
 	float x{};
@@ -86,10 +92,16 @@ enum class GameState {
 	STATE_MENU,
 	STATE_lobby,
 	STATE_PLAYING,
-	STATE_GAME_OVER
+	STATE_GAME_OVER,
+	state_map_select,
 };
 std::unordered_map<int, string>maps = {
-	{0, "maps/default_map.txt"}
+	{0, "maps/default_map.txt"},
+	{1, "maps/ceva.txt"}
+};
+std::map<string, int>maps_o = {
+	{"Default",0},
+	{"Ceva",1}
 };
 struct map {
 	int height{};
@@ -98,13 +110,14 @@ struct map {
 	int pl_nr{};
 	std::vector<std::vector<int>> matrix;
 	std::vector<std::vector<int>> pl_pos;
-	bool load_file(const std::string& filepath) {
+	bool load_file(const string& filepath) {
 		std::ifstream file(filepath);
 		if (!file.is_open()) {
 			std::cerr << "Error loading map file: " << filepath << "\n";
 			return false;
 		}
 		file >> height >> width >> scale >> pl_nr;
+		matrix.clear();
 		matrix.resize(height, std::vector<int>(width, 0));
 		pl_pos.clear();
 
@@ -123,6 +136,11 @@ struct map {
 				}
 			}
 		}
+		if (pl_nr != (int)pl_pos.size()) {
+			std::cout << "Info: Corrected pl_nr from " << pl_nr
+				<< " to actual spawn nodes found: " << pl_pos.size() << "\n";
+			pl_nr = (int)pl_pos.size();
+		}
 
 		file.close();
 		return true;
@@ -138,6 +156,7 @@ struct player {
 	float pos_f_y{};
 	int id{};
 	bool active = true;
+	float visible_delay{};
 	player(int h, string name, int x, int y,int i) :
 		health(h),
 		name(name),
@@ -157,16 +176,6 @@ struct projectile {
 };
 
 
-Color GetCellColor(int value) {
-	switch (value) {
-	case 0:  return BLACK;        // Ground
-	case 1:  return BLUE;		  // Water
-	case 2:  return YELLOW;       // Bush
-	case 3:  return BROWN;        // wall
-	case 4:  return DARKGRAY;     // indestructible Wall
-	default: return WHITE;        // Fallback
-	}
-};
 std::vector<Color> pl_colors = {
 	Color{ 230, 57,  70,  255 }, 
 	Color{ 58,  125, 203, 255 }, 
@@ -261,8 +270,8 @@ void SendInputToServer(ENetPeer* peer, player_input input) {
 void draw_tile(int screenX, int screenY, int size, int cellValue,int x, int y) {
 	DrawRectangle(screenX, screenY, size, size, Color{ 15, 18, 26, 255 });
 
-	DrawRectangleLines(screenX, screenY, size, size, Color{ 30, 41, 59, 100 });
-
+	//DrawRectangleLines(screenX, screenY, size, size, Color{ 30, 41, 59, 100 });
+	DrawRectangleLinesEx(Rectangle{ (float)screenX , (float)screenY , (float)size , (float)size }, 5.0f, Color{ 30, 41, 59, 100 });
 	switch (cellValue) {
 	case 0: { 
 		if ((x * 3 + y * 7) % 5 == 0) {
@@ -273,25 +282,25 @@ void draw_tile(int screenX, int screenY, int size, int cellValue,int x, int y) {
 	}
 	case 1: {
 		DrawRectangle(screenX + 4, screenY + 4, size - 8, size - 8, Color{ 25, 30, 45, 255 });
-		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 3.0f, BLUE);
+		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 5.0f, BLUE);
 		break;
 	}
 	case 2: {
 		DrawRectangle(screenX + 4, screenY + 4, size - 8, size - 8, Color{ 25, 30, 45, 255 });
-		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 3.0f, YELLOW);
+		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 5.0f, YELLOW);
 		break;
 	}
 	case 3: { 
 		DrawRectangle(screenX + 4, screenY + 4, size - 8, size - 8, Color{ 25, 30, 45, 255 });
-		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 3.0f, Color{ 255, 120, 0, 255 });
+		DrawRectangleLinesEx(Rectangle{ (float)screenX + 4, (float)screenY + 4, (float)size - 8, (float)size - 8 }, 5.0f, Color{ 255, 120, 0, 255 });
 		DrawRectangle(screenX + size / 4, screenY + size / 4, size / 2, size / 2, Color{ 40, 48, 68, 255 });
 		break;
 	}
 	case 4: { 
 		DrawRectangle(screenX + 2, screenY + 2, size - 4, size - 4, Color{ 10, 12, 18, 255 });
-		DrawRectangleLinesEx(Rectangle{ (float)screenX + 2, (float)screenY + 2, (float)size - 4, (float)size - 4 }, 4.0f, Color{ 0, 245, 255, 255 });
-		DrawLineEx(Vector2{ (float)screenX + 15, (float)screenY + 15 }, Vector2{ (float)screenX + size - 15, (float)screenY + size - 15 }, 2.0f, Color{ 0, 245, 255, 150 });
-		DrawLineEx(Vector2{ (float)screenX + size - 15, (float)screenY + 15 }, Vector2{ (float)screenX + 15, (float)screenY + size - 15 }, 2.0f, Color{ 0, 245, 255, 150 });
+		DrawRectangleLinesEx(Rectangle{ (float)screenX + 2, (float)screenY + 2, (float)size - 4, (float)size - 4 }, 5.0f, Color{ 0, 245, 255, 255 });
+		DrawLineEx(Vector2{ (float)screenX + 15, (float)screenY + 15 }, Vector2{ (float)screenX + size - 15, (float)screenY + size - 15 }, 4.0f, Color{ 0, 245, 255, 150 });
+		DrawLineEx(Vector2{ (float)screenX + size - 15, (float)screenY + 15 }, Vector2{ (float)screenX + 15, (float)screenY + size - 15 }, 4.0f, Color{ 0, 245, 255, 150 });
 		break;
 	}
 	default:
@@ -364,7 +373,6 @@ void match_drawing( std::optional<WorldStatePacket> (&world_buffer)[3],const std
 	cam_offset_y = std::clamp(cam_offset_y, 0, max_cam_y);
 	for (int y = 0; y < map.height; ++y) {
 		for (int x = 0; x < map.width; ++x) {
-			Color tileColor = GetCellColor(map.matrix[y][x]);
 			int tile_draw_x = (x * map.scale) - cam_offset_x;
 			int tile_draw_y = (y * map.scale) - cam_offset_y;
 			if (tile_draw_x >= -map.scale && tile_draw_x <= virtualWidth &&
@@ -385,10 +393,32 @@ void match_drawing( std::optional<WorldStatePacket> (&world_buffer)[3],const std
 		int tile = map.matrix[players[p_id].pos_y / map.scale][players[p_id].pos_x / map.scale];
 		if (tile == 2) {
 			if (p_id == my_id) {
-				pl_colors_team[team_idx].a = 128;
+				pl_colors_team[team_idx].a = 169;
 				DrawRectangle(final_draw_x, final_draw_y, pl_width, pl_width, pl_colors_team[team_idx]);
 				DrawText(TextFormat("%d", players[p_id].health), final_draw_x, final_draw_y - 96, 64, GREEN);
 				DrawText(TextFormat("%d", world_1->ammo), final_draw_x, final_draw_y - 160, 64, RED);
+			}
+			else {
+				int distance_x = abs(players[p_id].pos_x - players[my_id].pos_x);
+				int distance_y = abs(players[p_id].pos_y - players[my_id].pos_y);
+				if ((distance_x <= map.scale * 3)&& (distance_y <= map.scale * 3)) {
+					pl_colors_team[team_idx].a = 169;
+					DrawRectangle(final_draw_x, final_draw_y, pl_width, pl_width, pl_colors_team[team_idx]);
+					DrawText(TextFormat("%d", players[p_id].health), final_draw_x, final_draw_y - 96, 64, GREEN);
+				}
+				if (world_1->players[p_id].health!= world_2->players[p_id].health) {
+					players[p_id].visible_delay = 0.369;
+				}
+				if (players[p_id].visible_delay>0.0) {
+					players[p_id].visible_delay -= 2.0 / 69.0;
+					pl_colors_team[team_idx].a = 169;
+					DrawRectangle(final_draw_x, final_draw_y, pl_width, pl_width, pl_colors_team[team_idx]);
+					DrawText(TextFormat("%d", players[p_id].health), final_draw_x, final_draw_y - 96, 64, GREEN);
+				}
+				else {
+					players[p_id].visible_delay = 0.0;
+				}
+
 			}
 		}
 		else {
@@ -444,7 +474,8 @@ void match_drawing( std::optional<WorldStatePacket> (&world_buffer)[3],const std
 }
 struct menu_option {
 	string name;
-	bool selected = false;
+	bool selected = false;	
+	int* data{};
 };
 class button {
 public:
@@ -487,6 +518,92 @@ public:
 	}
 
 };
+class MapSelectionMenu {
+private:
+	bool selected = false;
+	int sent_id = -1;
+	float delay = 0.269;
+	std::vector<menu_option> map_menu;
+	std::map<std::string, int> maps_o;
+
+public:
+	MapSelectionMenu(const std::map<std::string, int>& available_maps)
+		: maps_o(available_maps) {
+		for (auto& map : maps_o) {
+			menu_option map_name;
+			map_name.name = map.first;
+			map_name.data = &map.second;
+			map_menu.push_back(map_name);
+		}
+		map_menu[0].selected = true;
+	}
+	void Update() {
+		delay -= 1.0 / 69.0;
+		if (IsKeyPressed(KEY_DOWN)) {
+			for (int i = 0; i < map_menu.size(); i++) {
+				if (map_menu[i].selected) {
+					map_menu[i].selected = false;
+					if (i + 1 < map_menu.size()) {
+						map_menu[i + 1].selected = true;
+					}
+					else {
+						map_menu[0].selected = true;
+					}
+					break;
+				}
+			}
+		}
+		if (IsKeyPressed(KEY_UP)) {
+			for (int i = 0; i < map_menu.size(); i++) {
+				if (map_menu[i].selected) {
+					map_menu[i].selected = false;
+					if (i - 1 >= 0) {
+						map_menu[i - 1].selected = true;
+					}
+					else {
+						map_menu[map_menu.size()-1].selected = true;
+					}
+					break;
+				}
+			}
+		}
+		if (delay <= 0.0) {
+			if (IsKeyPressed(KEY_ENTER)) {
+				for (int i = 0; i < map_menu.size(); i++) {
+					if (map_menu[i].selected) {
+						sent_id = *map_menu[i].data;
+						selected = true;
+					}
+				}
+			}
+		}
+	}
+	void Draw(int windowWidth, int windowHeight) {
+		int text_width = MeasureText("Select a map", 50);
+		DrawText("Select a map", windowWidth / 2 - text_width / 2, windowHeight / 3, 50, YELLOW);
+		int index = 0;
+		Vector2 mousePos = GetMousePosition();
+		for (auto it : map_menu) {
+			button button(windowWidth / 2 - 125, windowHeight / 2 + 30 * index, 250, 25, it.name.c_str(), 20);
+			button.Draw(mousePos, it.selected);
+			if (button.IsPressed(mousePos)) {
+				selected = true;
+				sent_id = *it.data;
+			}
+			index++;
+		}
+
+	}
+	bool IsConfirmed() const { return selected && sent_id != -1; }
+	int get_map_id() const { return sent_id; }
+	void Reset() {
+		selected = false;
+		sent_id = -1;
+		delay = 0.269;
+	}
+};
+
+
 
 int main() {
 	bool active = true;
@@ -544,6 +661,11 @@ int main() {
 	ENetEvent event;
 	if (enet_host_service(client, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
 		std::cout << "Connection to localhost:12345 succeeded!\n";
+		map_select id;
+		id.map_id = 0;
+		std::cout << "deliver map id " << id.map_id << std::endl;
+		ENetPacket* packet = enet_packet_create(&id, sizeof(map_select), ENET_PACKET_FLAG_RELIABLE);
+		enet_peer_send(peer, 0, packet);
 	}
 	else {
 		enet_peer_reset(peer);
@@ -554,8 +676,8 @@ int main() {
 
 
 
-	const int virtualWidth = 2 * max_view_x;
-	const int virtualHeight = 2 * max_view_y;
+	int virtualWidth = 2 * max_view_x;
+	int virtualHeight = 2 * max_view_y;
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	int win_width = 1280;
 	int win_height = 720;
@@ -565,6 +687,7 @@ int main() {
 	SetTextureFilter(canvas.texture, TEXTURE_FILTER_TRILINEAR);
 	int players_waiting=0;
 	int my_result = 0;
+	MapSelectionMenu map_menu(maps_o);
 	while (active && !WindowShouldClose()) {
 		if (IsKeyDown(KEY_X)|| WindowShouldClose()) {
 			active = false;
@@ -668,10 +791,10 @@ int main() {
 			int text_width = MeasureText("Geomatrix", 50);
 			bool selected = false;
 			int option = -1;
+			Vector2 mousePos = GetMousePosition();
 			DrawText("Geomatrix", windowWidth / 2 - text_width/2, windowHeight / 3, 50, YELLOW);
 			for (int i = 0; i < 4; i++) {
 				button button(windowWidth / 2-125, windowHeight / 2 + 30 * i,250,25, menu[i].name.c_str(), 20);
-				Vector2 mousePos = GetMousePosition();
 				button.Draw(mousePos, menu[i].selected);
 				if (button.IsPressed(mousePos)) {
 					selected = true;
@@ -729,6 +852,7 @@ int main() {
 					break;
 				}
 				case 2: {
+					current_state = GameState::state_map_select;
 					break;
 				}
 				case 3: {
@@ -737,6 +861,54 @@ int main() {
 				default:
 					break;
 				}
+			}
+
+			break;
+		}
+		case GameState::state_map_select: {
+			Vector2 mousePos = GetMousePosition();
+			map_menu.Update();
+			if (map_menu.IsConfirmed()) {
+				map_select id;
+				id.map_id = map_menu.get_map_id();
+				std::cout << "deliver map id " << id.map_id << std::endl;
+				ENetPacket* packet = enet_packet_create(&id, sizeof(map_select), ENET_PACKET_FLAG_RELIABLE);
+				map_menu.Reset();
+				enet_peer_send(peer, 0, packet);
+				current_state = GameState::STATE_MENU;
+				auto file_name = maps.find(id.map_id);
+				if (file_name != maps.end()) {
+
+					if (!current_map.load_file(file_name->second)) {
+						cout << "No map found in file" << std::endl;
+						std::cin.get();
+					}
+					else {
+						cout << "map loaded succesfully, width " << current_map.width << " height " << current_map.height << std::endl;
+						max_view_x = current_map.width * current_map.scale / 2;
+						max_view_y = current_map.width * current_map.scale / 2 / 16 * 9;
+						virtualWidth = 2 * max_view_x;
+						virtualHeight = 2 * max_view_y;
+						players.clear();
+						for (int i = 0; i < current_map.pl_nr; i++) {
+							player pl_temp(1000, "Player" + std::to_string(i), current_map.pl_pos[i][1], current_map.pl_pos[i][0], i);
+							pl_temp.active = true;
+							players.push_back(pl_temp);
+						}
+						UnloadRenderTexture(canvas);
+						canvas = LoadRenderTexture(virtualWidth, virtualHeight);
+						SetTextureFilter(canvas.texture, TEXTURE_FILTER_TRILINEAR);
+					}
+				}
+				
+			}
+			BeginDrawing();
+			ClearBackground(DARKBLUE);
+
+			map_menu.Draw(windowWidth, windowHeight);
+			EndDrawing();
+			if (IsKeyPressed(KEY_Z)) {
+				current_state = GameState::STATE_MENU;
 			}
 
 			break;
