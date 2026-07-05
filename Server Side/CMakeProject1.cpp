@@ -73,7 +73,8 @@ enum class ServerState {
 	GAME_OVER            
 };
 std::unordered_map<int, string>maps = {
-	{0, "maps/default_map.txt"}
+	{0, "maps/default_map.txt"},
+	{1, "maps/ceva.txt"}
 };
 struct map {
 	int height{};
@@ -89,6 +90,7 @@ struct map {
 			return false;
 		}
 		file >> height >> width >> scale>>pl_nr;
+		matrix.clear();
 		matrix.resize(height, std::vector<int>(width, 0));
 		pl_pos.clear();
 
@@ -179,7 +181,6 @@ bool collision(map& map, int& new_x, int& new_y) {
 		if (tile_x < 0 || tile_x >= map.width || tile_y < 0 || tile_y >= map.height) return false;
 
 		int tile_type = map.matrix[tile_y][tile_x];
-		// 0 = floor, 2 = bush, everything else (like 3 or 4) is solid wall
 		if (tile_type != 0 && tile_type != 2) {
 			return false;
 		}
@@ -202,7 +203,6 @@ bool aim(map& map, player(&players)[MAX_PLAYERS], projectile& pr, float d_time) 
 	if (pr.distance >= pr.range) {
 		return false;
 	}
-	//int* tile = &map.coordonates[pr.new_y][pr.new_x];
 	int* tile = &map.matrix[pr.new_y/map.scale][pr.new_x/map.scale];
 
 	if ((*tile == 3) || (*tile == 4)) {
@@ -542,6 +542,41 @@ int main() {
 						}
 					}
 
+				}
+				else if (packet_type == static_cast<uint8_t>(PacketType::select_map)) {
+					uint8_t id = static_cast<uint8_t>(event.packet->data[1]);
+					auto file_name = maps.find(id);
+					if (file_name != maps.end()) {
+						if (!current_map.load_file(file_name->second)) {
+							cout << "No map found in file" << std::endl;
+						}
+						else {
+							cout << "map loaded succesfully, width " << current_map.width << " height " << current_map.height << std::endl;
+							max_view_x = current_map.width * current_map.scale / 2;
+							max_view_y = current_map.height * current_map.scale / 2 / 16 * 9;
+							for (int i = 0; i < current_map.pl_pos.size(); i++) {
+								player pl_temp;
+								pl_temp.health = 1000;
+								pl_temp.name = "Player " + std::to_string(i);
+								pl_temp.pos_x = current_map.pl_pos[i][1];
+								pl_temp.pos_y = current_map.pl_pos[i][0];
+								pl_temp.range = 960;
+								pl_temp.ammo_damage = 100;
+								pl_temp.ammo_speed = 960;
+								pl_temp.speed = 640;
+								pl_temp.ammo_r = 26;
+								pl_temp.id = i;
+								pl_temp.reload_time = 0.69;
+								pl_temp.reload_timer = 0.0;
+								pl_temp.shoot_delay = 0.0;
+								pl_temp.ammo = 12;
+								pl_temp.ammo_now = pl_temp.ammo;
+								pl_temp.active = true;
+								pl_temp.peer = nullptr;
+								players[i] = pl_temp;
+							}
+						}
+					}
 				}
 				enet_packet_destroy(event.packet);
 				break;
