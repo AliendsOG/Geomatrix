@@ -20,7 +20,7 @@ This project wouldn't be possible without [Raylib](https://github.com/raysan5/ra
 - **Aiming**: Right Joystick;
 - **Shooting**: Right Trigger;
 
-#How is it build
+# How is it build
 
 **The Server**
 - Built in C++, uses ENet for comunication with the client over the UDP protocol for minimum latency;
