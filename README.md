@@ -1,5 +1,5 @@
-# Geometrical-Brawl-Stars
-A learning adventure for myself from which may come out a game like Brawl Stars but instead of brawlers there are interesting geometrical shapes.
+# Geomatrix
+A learning adventure for myself from which may come out a game with interesting geometrical shapes that fight each other to dominate the world of maths.
 ---
 This project wouldn't be possible without [Raylib](https://github.com/raysan5/raylib) and [Enet](https://github.com/lsalzman/enet)
 # How to get started
