@@ -1,5 +1,9 @@
 # Geomatrix
 A learning adventure for myself from which may come out a fast-paced multiplayer game where interesting geometrical shapes fight each other to dominate the world of maths.
+## Game Demo & Technical Walkthrough
+
+[![Geomatrix Alpha Live Demo Video](https://img.youtube.com/vi/FMHLG_zqpoI/0.jpg)](https://youtu.be/FMHLG_zqpoI?si=HZ_pQRCz5DoegHpV)
+Watch the live demo of the game↑
 ---
 ## Built With
 
@@ -9,16 +13,16 @@ This project wouldn't be possible without these incredible open-source libraries
 --- 
 # How to get started
 1. Head over to [Releases](https://github.com/AliendsOG/Geomatrix/releases) and download the Server and Client executables.
-2. Download the [maps](https://github.com/AliendsOG/Geomatrix/tree/main/maps)  folder and put it in the same directory as the executables, your local directory should look like this:;
+2. Download the [maps](https://github.com/AliendsOG/Geomatrix/tree/main/maps)  folder and put it in the same directory as the executables, your local directory should look like this:
     ```
     ├── Client.exe
     ├── Server.exe
     └── maps/
         └── [map files]
     ```
-4. Run the `Server.exe` first to start up the authoritative simulation framework;
-5. Run `Client.exe` to join the game. For multiple players run multiple instances of the `Client.exe`;
-7. It's play time now;
+3. Run the `Server.exe` first to start up the authoritative simulation framework.
+4. Run `Client.exe` to join the game. For multiple players run multiple instances of the `Client.exe`.
+5. It's play time now.
 
 # How to Play
 
@@ -36,7 +40,7 @@ This project wouldn't be possible without these incredible open-source libraries
 | **Aiming** | `Right Joystick`  |
 | **Shooting** | `Right Trigger (RT/R2)` |
 
-# How it is build
+# How it is built
 
 **The Server**
 * Built in C++, uses ENet for communication with the client over the UDP protocol for minimum latency;
