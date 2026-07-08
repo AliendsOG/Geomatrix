@@ -100,11 +100,11 @@ enum class GameState {
 	state_shape_select,
 	state_settings_menu,
 };
-std::unordered_map<int, string>maps = {
+const std::unordered_map<int, string>maps = {
 	{0, "maps/default_map.txt"},
 	{1, "maps/ceva.txt"}
 };
-std::map<string, int>maps_o = {
+const std::map<string, int>maps_o = {
 	{"Default",0},
 	{"Ceva",1}
 };
@@ -162,7 +162,7 @@ struct shape_ch {
 	int health{};
 	level_stats levels[3];
 };
-shape_ch shapes[3] = {
+const shape_ch shapes[3] = {
 	{
 		.id = 0,
 		.name = "Square",
@@ -191,16 +191,45 @@ shape_ch shapes[3] = {
 		}
 	}
 };
-std::map<string, int>shapes_map = {
+const std::unordered_map<string, int>shapes_map = {
 	{"Square",0},
 	{"Circle",1},
 	{"Superellipse",2}
 };
-std::map<string, int>settings_map = {
-	{"Resolution",0},
-	{"Target FPS",1},
-	{"Scale",2},
-	{"Fullscreen",3},
+const string settings_array[4] = {
+	{"Resolution"},
+	{"Fullscreen"},
+	{"Target FPS"},
+	{"Scale"},
+};
+const int resolutions_matrix[7][7] = {
+	{1280,720},
+	{ 1600,900 },
+	{1920,1080},
+	{2560,1440},
+	{3200,1800},
+	{3840,2160},
+	{7680,4320}
+
+};
+const int FPS_array[9] = {
+	360,
+	240,
+	165,
+	144,
+	120,
+	90,
+	75,
+	60,
+	30
+};
+const float scale_array[6] = {
+	1.0,
+	0.9,
+	0.8,
+	0.7,
+	0.6,
+	0.5
 };
 int pl_width = 96;
 struct player {
@@ -321,7 +350,7 @@ auto movement_float(bool gamepad) {
 class settings {
 	public:
 		int targetFPS = 144;
-		bool fullscreen;
+		bool fullscreen{};
 		int resolution_width= 1280;
 		int resolution_height = 720 ;
 		int last_map_id = 0;
@@ -708,7 +737,8 @@ void match_drawing(
 struct menu_option {
 	string name;
 	bool selected = false;	
-	int* data{};
+	int data{};
+	std::vector<menu_option> sub_options;
 };
 class button {
 public:
@@ -754,85 +784,152 @@ public:
 class menu_std {
 private:
 	bool selected = false;
+	bool details = false;
+	bool selected_sm = false;
+	int sent_id_sm = -1;
 	int sent_id = -1;
 	float delay = 0.269;
+	int main_menu_index = 0;
+	int submenu_index = 0;
 	std::vector<menu_option> map_menu;
-	std::map<std::string, int> maps_o;
 
 public:
-	menu_std(const std::map<std::string, int>& available_maps)
-		: maps_o(available_maps) {
-		for (auto& map : maps_o) {
-			menu_option map_name;
-			map_name.name = map.first;
-			map_name.data = &map.second;
-			map_menu.push_back(map_name);
-		}
-		map_menu[0].selected = true;
+	void add_option_main(string name, int index) {
+		menu_option menu_op_temp;
+		menu_op_temp.name = name;
+		menu_op_temp.data = index;
+		map_menu.push_back(menu_op_temp);
+		if (map_menu.size() == 1) map_menu[0].selected = true;
+		
+	}
+	void add_option_sub(string name, int index, int main_index) {
+		menu_option menu_op_temp;
+		menu_op_temp.name = name;
+		menu_op_temp.data = index;
+		map_menu[main_index].sub_options.push_back(menu_op_temp);
 	}
 	void Update() {
-		delay -= 1.0 / 69.0;
+		if (delay > 0.0f) {
+			delay -= GetFrameTime(); 
+			return;
+		}
+		auto& active_subs = map_menu[main_menu_index].sub_options;
 		if (IsKeyPressed(KEY_DOWN)) {
-			for (int i = 0; i < map_menu.size(); i++) {
-				if (map_menu[i].selected) {
-					map_menu[i].selected = false;
-					if (i + 1 < map_menu.size()) {
-						map_menu[i + 1].selected = true;
-					}
-					else {
-						map_menu[0].selected = true;
-					}
-					break;
-				}
+			if (!details && !map_menu.empty()) {
+				map_menu[main_menu_index].selected = false;
+				main_menu_index = (main_menu_index + 1) % map_menu.size();
+				map_menu[main_menu_index].selected = true;
+			}
+			else if (details && !active_subs.empty()) {
+				active_subs[submenu_index].selected = false;
+				submenu_index = (submenu_index + 1) % active_subs.size();
+				active_subs[submenu_index].selected = true;
 			}
 		}
 		if (IsKeyPressed(KEY_UP)) {
-			for (int i = 0; i < map_menu.size(); i++) {
-				if (map_menu[i].selected) {
-					map_menu[i].selected = false;
-					if (i - 1 >= 0) {
-						map_menu[i - 1].selected = true;
+			if (!details && !map_menu.empty()) {
+				map_menu[main_menu_index].selected = false;
+				main_menu_index = (main_menu_index - 1 + map_menu.size()) % map_menu.size();
+				map_menu[main_menu_index].selected = true;
+			}
+			else if (details && !active_subs.empty()) {
+				active_subs[submenu_index].selected = false;
+				submenu_index = (submenu_index - 1 + active_subs.size()) % active_subs.size();
+				active_subs[submenu_index].selected = true;
+			}
+		}
+
+		if (IsKeyPressed(KEY_ENTER)) {
+			if (!details) {
+				if (!map_menu.empty()) {
+					sent_id = map_menu[main_menu_index].data;
+
+					if (!active_subs.empty()) {
+						details = true;
+						submenu_index = 0;
+						for (auto& sub : active_subs) sub.selected = false;
+						active_subs[0].selected = true;
 					}
 					else {
-						map_menu[map_menu.size()-1].selected = true;
-					}
-					break;
-				}
-			}
-		}
-		if (delay <= 0.0) {
-			if (IsKeyPressed(KEY_ENTER)) {
-				for (int i = 0; i < map_menu.size(); i++) {
-					if (map_menu[i].selected) {
-						sent_id = *map_menu[i].data;
-						selected = true;
+						selected = true; 
 					}
 				}
 			}
+			else {
+				if (!active_subs.empty()) {
+					sent_id_sm = active_subs[submenu_index].data;
+					selected_sm = true;
+					selected = true;
+					details = false; 
+				}
+			}
 		}
+		
 	}
 	void Draw(int windowWidth, int windowHeight, string menu_name) {
 		int text_width = MeasureText(TextFormat("Select a %s",menu_name.c_str()), 50);
 		DrawText(TextFormat("Select a %s", menu_name.c_str()), windowWidth / 2 - text_width / 2, windowHeight / 3, 50, YELLOW);
-		int index = 0;
 		Vector2 mousePos = GetMousePosition();
-		for (auto it : map_menu) {
-			button button(windowWidth / 2 - 125, windowHeight / 2 + 30 * index, 250, 25, it.name.c_str(), 20);
-			button.Draw(mousePos, it.selected);
+		for (size_t i = 0; i < map_menu.size(); i++) {
+			button button(windowWidth / 2 - 125, windowHeight / 2 + 30 * i, 250, 25, map_menu[i].name.c_str(), 20);
+			button.Draw(mousePos, map_menu[i].selected);
 			if (button.IsPressed(mousePos)) {
-				selected = true;
-				sent_id = *it.data;
+				main_menu_index = i;
+				sent_id = map_menu[i].data;
+				if (!map_menu[i].sub_options.empty()) {
+					details = true;
+					submenu_index = 0;
+				}
+				else {
+					selected = true;
+				}
 			}
-			index++;
 		}
-
+		if (details) {
+			auto& active_subs = map_menu[main_menu_index].sub_options;
+			int sub_x = windowWidth / 2 + 130;
+			int sub_y = windowHeight / 2;
+			if (active_subs[0].name == "toggle") {
+				button button(windowWidth / 2 + 130, windowHeight / 2 + 30, 25, 25, "", 20);
+				button.Draw(mousePos, active_subs[0].selected);
+				if (button.IsPressed(mousePos)) {
+					submenu_index = 0;
+					sent_id_sm = active_subs[0].data;
+					selected_sm = true;
+					selected = true;
+					details = false;
+				}
+			}
+			else {
+				for (size_t i = 0; i < active_subs.size(); i++) {
+					button button(windowWidth / 2 + 130, windowHeight / 2 + 30 * i, 250, 25, active_subs[i].name.c_str(), 20);
+					button.Draw(mousePos, active_subs[i].selected);
+					if (button.IsPressed(mousePos)) {
+						submenu_index = i;
+						sent_id_sm = active_subs[i].data;
+						selected_sm = true;
+						selected = true;
+						details = false;
+					}
+				}
+			}
+		}
 	}
+
+
 	bool IsConfirmed() const { return selected && sent_id != -1; }
+	bool confirm_sm()const { return selected_sm && sent_id_sm != -1; }
+	bool entered()const { return details; }
 	int get_data() const { return sent_id; }
+	int get_data_sm() const { return sent_id_sm; }
 	void Reset() {
 		selected = false;
 		sent_id = -1;
 		delay = 0.269;
+	}
+	void reset_sm() {
+		selected_sm = false;
+		sent_id_sm = -1;
 	}
 };
 
@@ -912,10 +1009,12 @@ int main() {
 	int max_view_y = current_map.width * current_map.scale / 2 / 16 * 9;
 	int virtualWidth = 2 * max_view_x * current_scale;
 	int virtualHeight = 2 * max_view_y * current_scale;
+	int pl_width_og=pl_width;
 	pl_width *= current_scale;
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	int win_width = settings.resolution_width;
 	int win_height = settings.resolution_height;
+	
 	InitWindow(win_width, win_height, "Geomatrix");
 	SetTargetFPS(settings.targetFPS);
 	RenderTexture2D canvas = LoadRenderTexture(virtualWidth, virtualHeight);
@@ -925,9 +1024,42 @@ int main() {
 	int my_result = 0;
 	int my_shape_id=settings.last_shape_id;
 	int my_shape_level=0;
-	menu_std map_menu(maps_o);
-	menu_std shape_menu(shapes_map);
-	menu_std settings_menu(settings_map);
+	int trophies_got = 0;
+	int coins_got = 0;
+	menu_std map_menu;
+	for (auto it : maps_o) {
+		map_menu.add_option_main(it.first, it.second);
+	}
+	menu_std shape_menu;
+	for (auto it : shapes_map) {
+		shape_menu.add_option_main(it.first, it.second);
+	}
+	menu_std settings_menu;
+	for (int i = 0; i < 4; i++) {
+		settings_menu.add_option_main(settings_array[i], i);
+	}
+	int monitor = GetCurrentMonitor();
+	int nativeW = GetMonitorWidth(monitor);
+	int nativeH = GetMonitorHeight(monitor);
+	for (int i = 0; i <7; i++) {
+		if ((nativeW >= resolutions_matrix[i][0]) && (nativeH >= resolutions_matrix[i][1])) {
+			settings_menu.add_option_sub(std::to_string(resolutions_matrix[i][0]) + "x" + std::to_string(resolutions_matrix[i][1]), i,0);
+		}
+	}
+	if (settings.fullscreen) {
+		ToggleFullscreen();
+	}
+	settings_menu.add_option_sub("toggle", 0, 1);
+	for (int i = 8; i >= 0; i--) {
+		int refresh_rate = GetMonitorRefreshRate(GetCurrentMonitor());
+		if (refresh_rate >= FPS_array[i]) {
+			settings_menu.add_option_sub(std::to_string(FPS_array[i])+"Hz", i, 2);
+		}
+	}
+	for (int i = 5; i >= 0; i--) {
+		settings_menu.add_option_sub(TextFormat("%.1f", scale_array[i]), i, 3);
+	}
+
 	while (active && !WindowShouldClose()) {
 		if (IsKeyDown(KEY_X)|| WindowShouldClose()) {
 			active = false;
@@ -1004,6 +1136,12 @@ int main() {
 					else if (state_pkt->new_state == 2) { 
 						current_state = GameState::STATE_GAME_OVER;
 						my_result = event.packet->data[2];
+						trophies_got = event.packet->data[3];
+						coins_got = event.packet->data[4];
+						settings.trophies += trophies_got;
+						settings.coins += coins_got;
+						settings.save();
+
 					}
 					else if (state_pkt->new_state == 0) {
 						current_state = GameState::STATE_MENU;
@@ -1070,6 +1208,15 @@ int main() {
 					}
 				}
 			}
+			string ceva = "Useful controls for testing";
+			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 30) / 2, windowHeight / 1.4, 30, RAYWHITE);
+			ceva = "press Z to go back to the start menu";
+			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.4+35, 20, RAYWHITE);
+			ceva = "press x to exit the game client";
+			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.4+60, 20, RAYWHITE);
+			ceva = "press B to enter a match without connecting the total number of players";
+			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.4+85, 20, RAYWHITE);
+
 
 			EndDrawing();
 			if (IsKeyPressed(KEY_ENTER)) {
@@ -1175,7 +1322,6 @@ int main() {
 			}
 			BeginDrawing();
 			ClearBackground(DARKBLUE);
-
 			shape_menu.Draw(windowWidth, windowHeight, "shape");
 			EndDrawing();
 			if (IsKeyPressed(KEY_Z)) {
@@ -1186,17 +1332,88 @@ int main() {
 			break;
 		}
 		case GameState::state_settings_menu: {
-			Vector2 mousePos = GetMousePosition();
 			settings_menu.Update();
-			if (shape_menu.IsConfirmed()) {
-				my_shape_id = settings_menu.get_data();
-				my_shape_level = 0;
-				current_state = GameState::STATE_MENU;
-			}
+			int setting_selected = settings_menu.get_data();
 			BeginDrawing();
 			ClearBackground(DARKBLUE);
+			settings_menu.Draw(windowWidth, windowHeight, "setting");
+			if (settings_menu.entered()) {
+				switch (setting_selected) {
+				case 0: {
+					if (settings_menu.confirm_sm()) {
+						int index = settings_menu.get_data_sm();
+						int new_width = resolutions_matrix[index][0];
+						int new_height = resolutions_matrix[index][1];
+						SetWindowSize(new_width, new_height);
+						settings.resolution_width = new_width;
+						settings.resolution_height = new_height;
+						settings.save();
+						int monitor = GetCurrentMonitor();
+						int monitor_w = GetMonitorWidth(monitor);
+						int monitor_h = GetMonitorHeight(monitor);
+						int center_x = (monitor_w - new_width) / 2;
+						int center_y = (monitor_h - new_height) / 2;
+						SetWindowPosition(center_x, center_y);
+						settings_menu.reset_sm();
 
-			settings_menu.Draw(windowWidth, windowHeight, "shape");
+					}
+					break;
+				}
+				case 1:{
+					if (settings.fullscreen) {
+						DrawCircle(windowWidth / 2 + 142.5f, windowHeight / 2 + 42.5f, 10, BLUE);
+					}
+					if (IsKeyPressed(KEY_ENTER)) {
+						if (settings.fullscreen) {
+							settings.fullscreen = false;
+							ToggleFullscreen();
+
+						}
+						else {
+							settings.fullscreen = true;
+							ToggleFullscreen();
+						}
+						settings.save();
+					}
+
+					break;
+				}
+				case 2: {
+					if (settings_menu.confirm_sm()) {
+						int index = settings_menu.get_data_sm();
+						SetTargetFPS(FPS_array[index]);
+						settings.targetFPS = FPS_array[index];
+						settings.save();
+					}
+					break;
+				}
+				case 3: {
+					if (settings_menu.confirm_sm()) {
+						int index = settings_menu.get_data_sm();
+						current_scale = scale_array[index];
+						virtualWidth = 2 * max_view_x * current_scale;
+						virtualHeight = 2 * max_view_y * current_scale;
+						pl_width =pl_width_og* current_scale;
+						UnloadRenderTexture(canvas);
+						canvas = LoadRenderTexture(virtualWidth, virtualHeight);
+						SetTextureFilter(canvas.texture, TEXTURE_FILTER_BILINEAR);
+						settings.scale = current_scale;
+						settings.save();
+					}
+
+
+					break;
+				}
+				default: {
+					break;
+				}
+				}
+			}
+
+
+			string ceva = "Press Enter twice to confirm changes";
+			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.35, 20, RAYWHITE);
+			DrawFPS(10, 10);
 			EndDrawing();
 			if (IsKeyPressed(KEY_Z)) {
 				current_state = GameState::STATE_MENU;
@@ -1248,6 +1465,7 @@ int main() {
 			ClearBackground(MAROON);
 			DrawText("GAME OVER!", windowWidth / 2 - 160, windowHeight / 3, 30, WHITE);
 			DrawText(TextFormat("Your rank: %d", my_result), windowWidth / 2 - 160, windowHeight / 2.5, 30, WHITE);
+			DrawText(TextFormat("Got: %d trophies and %d coins", trophies_got, coins_got), windowWidth / 2 - 160, windowHeight / 2.25, 30, WHITE);
 			DrawText("PRESS [ENTER] TO RETURN TO MENU", windowWidth / 2 - 160, windowHeight / 2, 18, GRAY);
 			EndDrawing();
 			if (IsKeyPressed(KEY_ENTER)) {
