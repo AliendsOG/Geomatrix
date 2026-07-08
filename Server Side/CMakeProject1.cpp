@@ -23,6 +23,8 @@ struct MatchStatePacket {
 	uint8_t packet_type = static_cast<uint8_t>(PacketType::MATCH_STATE_CHANGE);
 	uint8_t new_state;
 	uint8_t position;
+	int8_t trophies;
+	uint8_t coins;
 };
 
 struct PlayerNetworkState {
@@ -76,6 +78,8 @@ std::unordered_map<int, string>maps = {
 	{0, "maps/default_map.txt"},
 	{1, "maps/ceva.txt"}
 };
+int trophy_payout[10] = {26,18,13,9,6,2,-2,-6,-9,-11};
+int coin_payout[10] = { 100,79,69,50,38,26,21,16,10,6};
 struct map {
 	int height{};
 	int width{};
@@ -502,6 +506,7 @@ int main() {
 		pl_temp.pos_y = current_map.pl_pos[i][0];
 		pl_temp.shape = shapes[0];
 		pl_temp.shape_level = 0;
+		pl_temp.ammo_now = pl_temp.shape.ammo;
 		pl_temp.health = pl_temp.shape.levels[0].health;
 		pl_temp.shape.ammo_damage = pl_temp.shape.levels[0].ammo_damage;
 		pl_temp.active = true;
@@ -583,6 +588,7 @@ int main() {
 							uint8_t level = static_cast<uint8_t>(event.packet->data[2]);
 							players[i].shape = shapes[shape_id];
 							players[i].shape_level = level;
+							players[i].ammo_now = players[i].shape.ammo;
 							players[i].health = shapes[shape_id].levels[level].health;
 							players[i].shape.ammo_damage = shapes[shape_id].levels[level].ammo_damage;
 							cout << "new shape loaded for player " << players[i].id << "with the shape id: " << shape_id << "level" << level << std::endl;
@@ -625,6 +631,7 @@ int main() {
 								pl_temp.pos_y = current_map.pl_pos[i][0];
 								pl_temp.shape = shapes[0];
 								pl_temp.shape_level = 0;
+								pl_temp.ammo_now = pl_temp.shape.ammo;
 								pl_temp.health = pl_temp.shape.levels[0].health;
 								pl_temp.shape.ammo_damage = pl_temp.shape.levels[0].ammo_damage;
 								pl_temp.active = true;
@@ -709,7 +716,9 @@ int main() {
 							cout << "Sending packet to Player " << players[i].id << " with rank " << (alive_count + 1) << std::endl;
 							MatchStatePacket win_pkt{
 								.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
-								.position = static_cast<uint8_t>(alive_count+1)
+								.position = static_cast<uint8_t>(alive_count + 1),
+								.trophies = static_cast<int8_t>(trophy_payout[alive_count]),
+								.coins = static_cast<uint8_t>(coin_payout[alive_count])
 							};
 							ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
 							enet_peer_send(players[i].peer, 0, packet);
@@ -722,7 +731,9 @@ int main() {
 					current_state = ServerState::GAME_OVER;
 					MatchStatePacket win_pkt{
 								.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
-								.position = 1
+								.position = 1,
+								.trophies = static_cast<int8_t>(trophy_payout[0]),
+								.coins = static_cast<uint8_t>(coin_payout[0])
 					};
 					ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
 					enet_peer_send(players[last_alive_id].peer, 0, packet);
@@ -742,6 +753,7 @@ int main() {
 					pl_temp.pos_y = current_map.pl_pos[i][0];
 					pl_temp.shape = shapes[0];
 					pl_temp.shape_level = 0;
+					pl_temp.ammo_now = pl_temp.shape.ammo;
 					pl_temp.health = pl_temp.shape.levels[0].health;
 					pl_temp.shape.ammo_damage = pl_temp.shape.levels[0].ammo_damage;
 					pl_temp.active = true;
