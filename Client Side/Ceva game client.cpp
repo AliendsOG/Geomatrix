@@ -1208,6 +1208,9 @@ int main() {
 					}
 				}
 			}
+			DrawText(TextFormat("You have %d trophies and %d coins", settings.trophies, settings.coins), windowWidth / 2 - MeasureText(TextFormat("You have %d trophies and %d coins", settings.trophies, settings.coins), 30) / 2, windowHeight / 2.4, 30, RAYWHITE);
+
+
 			string ceva = "Useful controls for testing";
 			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 30) / 2, windowHeight / 1.4, 30, RAYWHITE);
 			ceva = "press Z to go back to the start menu";
