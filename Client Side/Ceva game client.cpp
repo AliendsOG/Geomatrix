@@ -99,6 +99,7 @@ enum class GameState {
 	state_map_select,
 	state_shape_select,
 	state_settings_menu,
+	state_shape_screen,
 };
 const std::unordered_map<int, string>maps = {
 	{0, "maps/default_map.txt"},
@@ -108,11 +109,16 @@ const std::map<string, int>maps_o = {
 	{"Default",0},
 	{"Ceva",1}
 };
+const std::unordered_map<int, string>maps_id_name = {
+	{0,"Default"},
+	{1,"Ceva"}
+};
 struct map {
 	int height{};
 	int width{};
 	int scale{};
 	int pl_nr{};
+	int id{};
 	std::vector<std::vector<int>> matrix;
 	std::vector<std::vector<int>> pl_pos;
 	bool load_file(const string& filepath) {
@@ -160,41 +166,59 @@ struct shape_ch {
 	string name{};
 	int level{};
 	int health{};
-	level_stats levels[3];
+	std::array<level_stats, 3> levels;
 };
-const shape_ch shapes[3] = {
+const int level_up_prices[2] = {256, 512 };
+shape_ch shapes[3] = {
 	{
 		.id = 0,
 		.name = "Square",
-		.levels = {
-			{.health = 1000, .ammo_damage = 100 },
-			{.health = 1200, .ammo_damage = 120 },
-			{.health = 1450, .ammo_damage = 145 },
-		}
+		.level = 0,
+		.levels = {{
+			{1000, 100}, 
+			{1200, 120}, 
+			{1450, 145} 
+		}}
 	},
 	{
 		.id = 1,
 		.name = "Circle",
-		.levels = {
-			{.health = 1500, .ammo_damage = 65 },
-			{.health = 1700, .ammo_damage = 80 },
-			{.health = 1950, .ammo_damage = 105 },
-		}
+		.level = 0,
+		.levels = {{
+			{1500,  65 },
+			{1700,  80 },
+			{1950,  105 },
+		}}
 	},
 	{
 		.id = 2,
 		.name = "Superellipse",
-		.levels = {
-			{.health = 1250, .ammo_damage = 150 },
-			{.health = 1450, .ammo_damage = 170 },
-			{.health = 1800, .ammo_damage = 200 },
-		}
+		.level = 0,
+		.levels = {{
+			{1250,  150 },
+			{1450,  170 },
+			{1800,  200 },
+		}}
 	}
 };
+const int shapes_price_reals_array[std::size(shapes)] = {0, 256, 512};
+const int shapes_price_imaginaries_array[std::size(shapes)] = { 0, 4, 8};
 const std::unordered_map<string, int>shapes_map = {
 	{"Square",0},
 	{"Circle",1},
 	{"Superellipse",2}
+};
+std::vector<shape_ch>shapes_unlocked={
+	{
+		.id = 0,
+		.name = "Square",
+		.level = 0,
+		.levels = {{
+			{1000,  100 },
+			{1200,  120 },
+			{1450,  145 },
+		}}
+	}
 };
 const string settings_array[4] = {
 	{"Resolution"},
@@ -351,15 +375,17 @@ class settings {
 	public:
 		int targetFPS = 144;
 		bool fullscreen{};
+		bool tutorial = true;
 		int resolution_width= 1280;
 		int resolution_height = 720 ;
 		int last_map_id = 0;
 		int last_shape_id = 0;
-		int coins = 0;
-		int trophies = 0;
+		int reals = 0;
+		int imaginaries = 0;
+		int quanta = 0;
 		float scale = 0.5;
 		string filename = "settings.txt";
-
+		string shapes_file = "shapes.txt";
 		void load() {
 			std::ifstream infile(filename);
 
@@ -369,41 +395,83 @@ class settings {
 				return;
 			}
 
-			std::string line;
+			string line;
 			while (std::getline(infile, line)) {
 				std::istringstream iss(line);                
-				std::string key;                
+				string key;                
 				if (std::getline(iss, key, '=')) {
-					std::string value; 
+					string value; 
 					if (std::getline(iss, value)) {
 
 						if (key == "TargetFPS")    targetFPS = std::stoi(value);
 						else if (key == "Fullscreen") fullscreen = (value == "1" || value == "true");
+						else if (key == "Tutorial") tutorial = (value == "1" || value == "true");
 						else if (key == "Res Height") resolution_height = std::stoi(value);
 						else if (key == "Res Width") resolution_width = std::stoi(value);
 						else if (key == "Last Map Id") last_map_id = std::stoi(value);
 						else if (key == "Last Shape Id") last_shape_id = std::stoi(value);
-						else if (key == "Coins") coins = std::stoi(value);
-						else if (key == "Trophies") trophies = std::stoi(value);
+						else if (key == "Reals") reals = std::stoi(value);
+						else if (key == "Quanta") quanta = std::stoi(value);
 						else if (key == "Scale") scale = std::stof(value);
 					}
 				}
 			}
 			infile.close();
 		}
+		void load_shapes() {
+			std::ifstream infile(shapes_file);
+			if (!infile.is_open()) {
+				cout << "Settings file doesn't exist. Creating defaults...\n";
+				save_shape();
+				return;
+			}
+			string line;
+			while (std::getline(infile, line)) {
+				std::istringstream iss(line);
+				string key;
+				if (std::getline(iss, key, ' ')) {
+					string value;
+					if (std::getline(iss, value)) {
+						if (std::stoi(key) == 0) {
+							shapes_unlocked[std::stoi(key)].level = std::stoi(value);
+						}
+						else {
+							shape_ch shape;
+							shape.id = std::stoi(key);
+							shape.level = std::stoi(key);
+							shape.name = shapes[shape.id].name;
+							shape.levels = shapes[shape.id].levels;
+							shapes_unlocked.push_back(shape);
+						}
+					}
+				}
+			}
 
+			infile.close();
+
+		}
+		void save_shape() {
+			std::ofstream outfile(shapes_file, std::ios::out | std::ios::trunc);
+			if (outfile.is_open()) {
+				for (int i = 0; i < shapes_unlocked.size(); i++) {
+					outfile << shapes_unlocked[i].id << ' ' << shapes[i].level<<"\n";
+				}
+				outfile.close();
+			}
+		}
 		void save() {
 			std::ofstream outfile(filename, std::ios::out | std::ios::trunc);
 
 			if (outfile.is_open()) {
 				outfile << "TargetFPS=" << targetFPS << "\n";
 				outfile << "Fullscreen=" << fullscreen<< "\n";
+				outfile << "Tutorial=" << tutorial << "\n";
 				outfile << "Res Height=" << resolution_height << "\n"; 
 				outfile << "Res Width=" << resolution_width<< "\n";
 				outfile << "Last Map Id=" << last_map_id << "\n";
 				outfile << "Last Shape Id=" << last_shape_id << "\n";
-				outfile << "Trophies=" << trophies << "\n";
-				outfile << "Coins=" << coins << "\n";
+				outfile << "Quanta=" << quanta << "\n";
+				outfile << "Reals=" << reals << "\n";
 				outfile << "Scale=" << scale << "\n";
 				outfile.close();
 			}
@@ -746,6 +814,8 @@ public:
 	Color baseColor;
 	Color hoverColor;
 	Color activeColor;
+	Color text_color;
+	float corner_r;
 	const char* text;
 	int fontSize;
 	button(float x, float y, float width, float height, const char* buttonText, int size) {
@@ -755,6 +825,8 @@ public:
 		activeColor = BLACK;
 		text = buttonText;
 		fontSize = size;
+		corner_r = 0.69;
+		text_color = WHITE;
 	}
 	bool IsPressed(Vector2 mousePos) {
 		return CheckCollisionPointRec(mousePos, bounds) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
@@ -772,12 +844,12 @@ public:
 		if (selected) {
 			currentColor = hoverColor;
 		}
-		DrawRectangleRounded(bounds, 0.69, 9, currentColor);
+		DrawRectangleRounded(bounds, corner_r, 255, currentColor);
 
 		int textWidth = MeasureText(text, fontSize);
 		float textX = bounds.x + (bounds.width - textWidth) / 2;
 		float textY = bounds.y + (bounds.height - fontSize) / 2;
-		DrawText(text, textX, textY, fontSize, WHITE);
+		DrawText(text, textX, textY, fontSize, text_color);
 	}
 
 };
@@ -916,7 +988,6 @@ public:
 		}
 	}
 
-
 	bool IsConfirmed() const { return selected && sent_id != -1; }
 	bool confirm_sm()const { return selected_sm && sent_id_sm != -1; }
 	bool entered()const { return details; }
@@ -932,7 +1003,136 @@ public:
 		sent_id_sm = -1;
 	}
 };
+void draw_shape_menu(int shape_id, int window_height, int window_width,int x, int y){
+	switch (shape_id) {
+	case 0: {
+		DrawRectangle(x - window_height /4, y - window_height / 4, window_height/2, window_height/2, RED);
+		break;
+	}
+	case 1: {
+		DrawCircle(x, y, window_height/4, RED);
+		break;
+	}
+	case 2: {
+		DrawSuperellipse(x, y, window_height / 4, window_height / 4, 4, RED);
+		break;
+	}
+	}
 
+}
+class shape_card {
+public:
+	int x, y, height, width, id;
+	Rectangle card;
+	shape_card(int shape_id, int width_ceva, int h, int pos_x, int pos_y) {
+		x = pos_x;
+		y = pos_y;
+		height = h;
+		id = shape_id;
+		width = width_ceva;
+		card = { (float)x,(float)y,(float)width,(float)height };
+	}
+	void draw() {
+		DrawRectangleRounded(card, 0.2, 255, BLUE);
+		draw_shape_menu(id, 1.4*height, 1.4*width, x + width / 2, y + height / 2.3-8);
+		DrawText(shapes[id].name.c_str(), x + width / 2 - MeasureText(shapes[id].name.c_str(), 40)/2,y+height-50, 40, RAYWHITE);
+	}
+	bool is_pressed() {
+		return CheckCollisionPointRec(GetMousePosition(), card) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+	}
+	int get_id() {
+		return id;
+	}
+};
+
+enum class WaveType { SINE, SAWTOOTH, TRIANGLE, CHIRP };
+
+void draw_background(int window_width, int window_height) {
+	// Fill the screen with a clean, dark base canvas first
+	ClearBackground(Color{ 15, 15, 25, 255 });
+
+	float time = GetTime();
+
+	// Define the sequence of waves we want to render down the screen
+	WaveType wave_stack[] = {
+		WaveType::SINE,
+		WaveType::SAWTOOTH,
+		WaveType::TRIANGLE,
+		WaveType::CHIRP,
+		WaveType::SINE,
+		WaveType::SAWTOOTH,
+		WaveType::TRIANGLE,
+		WaveType::CHIRP,
+		WaveType::SINE,
+		WaveType::SAWTOOTH,
+	};
+	int total_waves = 10;
+
+	float vertical_spacing = window_height / (float)(total_waves + 1);
+
+	float frequency = 0.1f;
+	float speed = 2.69f;
+	float amplitude = window_height / 40.0f; 
+	for (int w = 0; w < total_waves; w++) {
+		std::vector<Vector2> points;
+		float y_center = vertical_spacing * (w + 1); 
+		WaveType current_type = wave_stack[w];
+
+		for (int x = 0; x < window_width; x += 2) {
+			float phase = (x * frequency) + (time * speed);
+			float y = y_center;
+
+			switch (current_type) {
+			case WaveType::SINE:{
+				y += std::sin(phase) * amplitude;
+				break;
+			}
+			case WaveType::SAWTOOTH: {
+				float phase2 = (x * (frequency * 1.2f)) + (time * (speed * 1.69));
+				y += (std::sin(phase) + std::sin(phase2)) * (amplitude * 0.5f);
+				break;
+			}
+
+			case WaveType::TRIANGLE: {
+				float frac = fmodf(phase, 2.0f * PI) / (2.0f * PI);
+				if (frac < 0.0f) frac += 1.0f;
+				y += amplitude * (4.0f * std::abs(frac - 0.5f) - 1.0f);
+				break;
+			}
+
+			case WaveType::CHIRP: {
+				float phase2 = (x * (frequency * 2.2f)) + (time * (speed *1.69 )); 
+				 y  += (std::sin(phase) + std::cos(phase2)) * (amplitude * 0.5f);
+				break;
+			}
+			}
+
+			points.push_back({ (float)x, y });
+		}
+		for (size_t i = 0; i < points.size() - 1; i++) {
+			float progress = (float)i / points.size();
+			float hue = fmodf((progress * 360.0f) + (time * 50.0f) + (w * 360.0f), 360.0f);
+
+			Color color = ColorFromHSV(hue, 0.85f, 0.9f);
+			color.a = 130;
+
+			DrawLineEx(points[i], points[i + 1], 4.0f, color);
+		}
+	}
+}
+void draw_shape_screen(int win_h, int win_w, int id) {
+	draw_background(win_w, win_h);
+	DrawText(shapes[id].name.c_str(), win_w / 3 - MeasureText(shapes[id].name.c_str(), 100) / 2+10, 10, 100, RAYWHITE);
+	draw_shape_menu(id, win_h, win_w, win_w / 3 + 10, win_h / 2);
+	Rectangle stats = { (float)win_w - win_w / 3.0f - 10, 10, (float)win_w / 3.0f,(float)win_h - 20 };
+	DrawRectangleRounded(stats, 0.1, 255, BLUE);
+	string ceva = "Level " + std::to_string(shapes[id].level+1);
+	DrawText(ceva.c_str(), win_w - win_w / 6 - MeasureText(ceva.c_str(), 60) / 2-10, 20, 60, RAYWHITE);
+	ceva = "Health: " + std::to_string(shapes[id].levels[shapes[id].level].health);
+	DrawText(ceva.c_str(), win_w - win_w / 6 - MeasureText(ceva.c_str(), 60) / 2-10, 20+80, 60, RAYWHITE);
+	ceva = "Damage: " + std::to_string(shapes[id].levels[shapes[id].level].ammo_damage);
+	DrawText(ceva.c_str(), win_w - win_w / 6 - MeasureText(ceva.c_str(), 60) / 2-10, 20 + 180, 60, RAYWHITE);
+}
 int main() {
 	bool active = true;
 	int my_id=-1;
@@ -941,12 +1141,15 @@ int main() {
 	std::optional<WorldStatePacket> world_buffer[3]{};
 	std::optional<double> time_buffer[3]{};
 	menu_option menu[4];
-	string menu_names[4] = {"Play","Change Shape", "Change Map", "Settings"};
+	string menu_names[4] = {"Play","Change Shape", "Change Maps", "Settings"};
 	for (int i = 0; i < 4; i++) menu[i].name = menu_names[i];
 	menu[0].selected = true;
 	settings settings;
 	settings.load();
-	
+	settings.load_shapes();
+	for (int i = 0; i < shapes_unlocked.size(); i++) {
+		shapes[i].level = shapes_unlocked[i].level;
+	}
 	if (enet_initialize() != 0) {
 		std::cerr << "An error occurred while initializing ENet.\n";
 		return 1;
@@ -994,6 +1197,7 @@ int main() {
 			cout << "map loaded succesfully, width " << current_map.width << " height " << current_map.height << std::endl;
 			map_select id;
 			id.map_id = settings.last_map_id;
+			current_map.id = settings.last_map_id;
 			std::cout << "deliver map id " << id.map_id << std::endl;
 			ENetPacket* packet = enet_packet_create(&id, sizeof(map_select), ENET_PACKET_FLAG_RELIABLE);
 			enet_peer_send(peer, 0, packet);
@@ -1026,13 +1230,11 @@ int main() {
 	int my_shape_level=0;
 	int trophies_got = 0;
 	int coins_got = 0;
+	int imaginaries_got = 0;
+	int shape_screen_id = 0;
 	menu_std map_menu;
 	for (auto it : maps_o) {
 		map_menu.add_option_main(it.first, it.second);
-	}
-	menu_std shape_menu;
-	for (auto it : shapes_map) {
-		shape_menu.add_option_main(it.first, it.second);
 	}
 	menu_std settings_menu;
 	for (int i = 0; i < 4; i++) {
@@ -1059,7 +1261,6 @@ int main() {
 	for (int i = 5; i >= 0; i--) {
 		settings_menu.add_option_sub(TextFormat("%.1f", scale_array[i]), i, 3);
 	}
-
 	while (active && !WindowShouldClose()) {
 		if (IsKeyDown(KEY_X)|| WindowShouldClose()) {
 			active = false;
@@ -1093,7 +1294,7 @@ int main() {
 						+ (server_projectiles * sizeof(projectile_network));
 					if (event.packet->dataLength < expected_bytes) {
 						std::cout << "Warning: Truncated packet dropped! Expected "
-							<< expected_bytes << ", got " << event.packet->dataLength << "\n";
+							<< expected_bytes << ", got " << event.packet->dataLength << std::endl;
 						enet_packet_destroy(event.packet);
 						break;
 					}
@@ -1138,8 +1339,8 @@ int main() {
 						my_result = event.packet->data[2];
 						trophies_got = event.packet->data[3];
 						coins_got = event.packet->data[4];
-						settings.trophies += trophies_got;
-						settings.coins += coins_got;
+						settings.quanta += trophies_got;
+						settings.reals += coins_got;
 						settings.save();
 
 					}
@@ -1167,14 +1368,55 @@ int main() {
 		case GameState::STATE_MENU: {
 			BeginDrawing();
 			ClearBackground(DARKBLUE);
-			int text_width = MeasureText("Geomatrix", 50);
+			draw_background(windowWidth, windowHeight);
 			bool selected = false;
 			int option = -1;
 			Vector2 mousePos = GetMousePosition();
-			DrawText("Geomatrix", windowWidth / 2 - text_width/2, windowHeight / 3, 50, YELLOW);
+			DrawText("Geomatrix", windowWidth / 2 - MeasureText("Geomatrix", 80) /2, windowHeight / 13, 80, YELLOW);
+			string map_name = maps_id_name.find(current_map.id)->second + " map";
+
 			for (int i = 0; i < 4; i++) {
 				button button(windowWidth / 2-125, windowHeight / 2 + 30 * i,250,25, menu[i].name.c_str(), 20);
+				switch (i) {
+				case 0: {
+					button.bounds = { (float)windowWidth - 10 - windowWidth / 3.69f,(float) windowHeight-10-windowHeight/8, (float)windowWidth / 3.69f,(float)windowHeight / 8 };
+					button.fontSize = 60;
+					button.hoverColor = Color{ 215,215,0,255 };
+					button.corner_r = 0.4;
+					break;
+				}
+				case 1: {
+					button.bounds = { (float) 10,(float)windowHeight - 10 - windowHeight / 8, (float)windowWidth / 3.69f,(float)windowHeight / 8 };
+					button.fontSize = 40;
+					button.hoverColor = Color{ 215,215,0,255 };
+					button.corner_r = 0.4;
+					break;
+				}
+				case 2: {
+					button.bounds = { (float)windowWidth / 3.69f+20,(float)windowHeight - 10 - windowHeight / 8, (float)windowWidth- 2* windowWidth / 3.69f-40,(float)windowHeight / 8 };
+					button.fontSize = 40;
+					button.hoverColor = Color{ 215,215,0,255 };
+					button.corner_r = 0.4;
+					button.text = map_name.c_str();
+
+					break;
+				}
+				case 3:{
+					button.bounds = { (float)windowWidth-10- windowWidth / 5.69f,(float)10, (float)windowWidth / 5.69f,(float)windowHeight / 12 };
+					button.fontSize = 40;
+					button.hoverColor = Color{ 215,215,0,255 };
+					button.corner_r = 0.4;
+					break;
+				}
+				default:{
+					break;
+				}
+				}
+
+
+
 				button.Draw(mousePos, menu[i].selected);
+
 				if (button.IsPressed(mousePos)) {
 					selected = true;
 					option = i;
@@ -1208,19 +1450,49 @@ int main() {
 					}
 				}
 			}
-			DrawText(TextFormat("You have %d trophies and %d coins", settings.trophies, settings.coins), windowWidth / 2 - MeasureText(TextFormat("You have %d trophies and %d coins", settings.trophies, settings.coins), 30) / 2, windowHeight / 2.4, 30, RAYWHITE);
+			
+			DrawRectangleRounded(Rectangle{(float)windowWidth-windowWidth/5.69f - 260, 10, 240,60},0.2,255,RED);
+			DrawText(TextFormat("%d reals", settings.reals), (float)windowWidth - windowWidth / 5.69f - 140- MeasureText(TextFormat("%d reals", settings.reals),40)/2, 20, 40,RAYWHITE );
+			DrawRectangleRounded(Rectangle{ 10, 10, 280,60 }, 0.2, 255, RED);
+			DrawText(TextFormat("%d quanta", settings.quanta), (float)10+280/2.0f- MeasureText(TextFormat("%d quanta", settings.quanta), 40) / 2, 20, 40, RAYWHITE);
 
 
-			string ceva = "Useful controls for testing";
-			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 30) / 2, windowHeight / 1.4, 30, RAYWHITE);
-			ceva = "press Z to go back to the start menu";
-			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.4+35, 20, RAYWHITE);
-			ceva = "press x to exit the game client";
-			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.4+60, 20, RAYWHITE);
-			ceva = "press B to enter a match without connecting the total number of players";
-			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.4+85, 20, RAYWHITE);
+			Rectangle bounds = {windowWidth-300,windowHeight-150,200,100};
+			draw_shape_menu(settings.last_shape_id, windowHeight, windowWidth, windowWidth/2,windowHeight/2);
+			if (settings.tutorial) {
+				int pop_w = windowWidth / 8 * 5;
+				int pop_h = windowHeight / 8 * 5;
+				int pop_x = (windowWidth - windowWidth / 8 * 5) / 2;
+				int pop_y = (windowHeight - windowHeight / 8 * 5) / 2;
+				Rectangle pop_up_rec = {pop_x,pop_y,pop_w,pop_h};
+				DrawRectangleRounded(pop_up_rec, 0.0569, 1024, BLUE);
+				button pop_exit((windowWidth + windowWidth / 8 * 5) / 2-55,pop_y+10, 45,45,"X",35);
+				pop_exit.corner_r = .4;
+				if (pop_exit.IsPressed(GetMousePosition())) {
+					settings.tutorial = false;
+					settings.save();
+				}
 
+				pop_exit.Draw(GetMousePosition(), false);
 
+				string ceva = "Controls";
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 50) / 2, pop_y + 20, 50, WHITE);
+				ceva = "W A S D for moving";
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, pop_y+90, 20, RAYWHITE);
+				ceva = "Arrow keys for aiming";
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, pop_y+120, 20, RAYWHITE);
+				ceva = "press E to shoot";
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, pop_y+150, 20, RAYWHITE);
+				ceva = "Useful controls for testing";
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 30) / 2, windowHeight/2, 30, RAYWHITE);
+				ceva = "press Z to go back to the start menu";
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight/2 + 50, 20, RAYWHITE);
+				ceva = "press x to exit the game client";
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 2 + 80, 20, RAYWHITE);
+				ceva = "press B to enter a match without connecting the total number of players";
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 2 + 110, 20, RAYWHITE);
+			}
+			DrawFPS(10, 10);
 			EndDrawing();
 			if (IsKeyPressed(KEY_ENTER)) {
 				for (int i = 0; i < 4; i++) {
@@ -1273,7 +1545,6 @@ int main() {
 				current_state = GameState::STATE_MENU;
 				auto file_name = maps.find(id.map_id);
 				if (file_name != maps.end()) {
-
 					if (!current_map.load_file(file_name->second)) {
 						cout << "No map found in file" << std::endl;
 						std::cin.get();
@@ -1294,6 +1565,7 @@ int main() {
 							players.push_back(pl_temp);
 						}
 						settings.last_map_id = id.map_id;
+						current_map.id = id.map_id;
 						settings.save();
 						UnloadRenderTexture(canvas);
 						canvas = LoadRenderTexture(virtualWidth, virtualHeight);
@@ -1301,9 +1573,16 @@ int main() {
 					}
 				}
 				
+			}	
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30);
+
+			if (back.IsPressed(GetMousePosition())) {
+				current_state = GameState::STATE_MENU;
 			}
 			BeginDrawing();
-			ClearBackground(DARKBLUE);
+			draw_background(windowWidth, windowHeight);
+			back.Draw(GetMousePosition(), false);
+
 
 			map_menu.Draw(windowWidth, windowHeight, "map");
 			EndDrawing();
@@ -1314,31 +1593,153 @@ int main() {
 			break;
 		}
 		case GameState::state_shape_select: {
-			Vector2 mousePos = GetMousePosition();
-			shape_menu.Update();
-			if (shape_menu.IsConfirmed()) {
-				my_shape_id = shape_menu.get_data();
-				settings.last_shape_id = my_shape_id;
-				settings.save();
-				my_shape_level = 0;
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30);
+			if (back.IsPressed(GetMousePosition())) {
 				current_state = GameState::STATE_MENU;
+
 			}
 			BeginDrawing();
-			ClearBackground(DARKBLUE);
-			shape_menu.Draw(windowWidth, windowHeight, "shape");
+			draw_background(windowWidth, windowHeight);
+
+			back.Draw(GetMousePosition(), false);
+			int row_nr=0;
+			for(int i=0;i< std::size(shapes);i++){
+				int order = i % 3;
+				int pos_x = 0;
+				int pos_y = 40 + (windowHeight / 4+10) * row_nr;
+				switch (order) {
+				case 0: {
+					pos_x = windowWidth / 2 - windowWidth / 8 - 10 - windowWidth / 4;
+					break;
+				}
+				case 1: {
+					pos_x = windowWidth / 2 - windowWidth / 8;
+					break;
+				}
+				case 2: {
+					pos_x = windowWidth / 2 + windowWidth / 8 + 10;
+					row_nr++;
+					break;
+				}
+				default: {
+					break;
+				}
+				}
+				shape_card card(i, windowWidth / 4, windowHeight / 4, pos_x, pos_y);
+				card.draw();
+				if (card.is_pressed()) {
+					current_state = GameState::state_shape_screen;
+					shape_screen_id = card.get_id();
+				}
+			}
+			
+			EndDrawing();
+
+
+			if (IsKeyPressed(KEY_Z)) {
+				current_state = GameState::STATE_MENU;
+			}
+			break;
+		}
+		case GameState::state_shape_screen: {
+			bool unlocked = false;
+			int index = 0;
+			for (int i = 0; i < std::size(shapes_unlocked); i++) {
+				if (shapes_unlocked[i].id == shape_screen_id) {
+					unlocked = true;
+					index = i;
+					break;
+				}
+			}
+
+			button select(windowWidth - windowWidth / 3, windowHeight - windowHeight / 6-20, windowWidth / 3-20, windowHeight / 6,TextFormat("%d reals",shapes_price_reals_array[shape_screen_id]), 50);
+			select.corner_r = 0.269;
+			button upgrade(windowWidth - windowWidth / 3, windowHeight - 2*windowHeight / 6 - 30, windowWidth / 3 - 20, windowHeight / 6, TextFormat("%d reals", level_up_prices[shapes[shape_screen_id].level]), 50);
+			upgrade.corner_r = 0.269;
+			int img_price=0;
+			bool img_pop_up=false;
+			if (unlocked) {
+				select.text = "Select";
+				bool check = settings.reals >= level_up_prices[shapes[shape_screen_id].level];
+				if (!check) {
+					upgrade.text_color = GRAY;
+				}
+				if (select.IsPressed(GetMousePosition())) {
+					my_shape_id = shape_screen_id;
+					my_shape_level = shapes_unlocked[index].level;
+					settings.last_shape_id = shape_screen_id;
+					settings.save();
+					current_state = GameState::STATE_MENU;
+				}
+				if (upgrade.IsPressed(GetMousePosition())) {
+					if (check) {
+						settings.reals -= level_up_prices[shapes[shape_screen_id].level];
+						shapes[shape_screen_id].level++;
+						shapes_unlocked[index].level++;
+						my_shape_level++;
+						settings.save_shape();
+					}
+					
+					
+				}
+			}
+			else {
+				bool check = settings.reals >= shapes_price_reals_array[shape_screen_id];
+				if (!check) {
+					select.text_color = GRAY;
+				}
+				if (select.IsPressed(GetMousePosition())) {
+					if (check) {
+						settings.reals -= shapes_price_reals_array[shape_screen_id];
+						settings.save();
+						shapes_unlocked.push_back(shapes[shape_screen_id]);
+						settings.save_shape();
+					}
+					//Another currency (imaginaries) work in progress
+					//else {
+					//	check = settings.imaginaries >= shapes_price_imaginaries_array[shape_screen_id];
+					//	if (check) {
+					//		settings.imaginaries -= shapes_price_imaginaries_array[shape_screen_id];
+					//		settings.save();
+					//		shapes_unlocked.push_back(shapes[shape_screen_id]);
+					//		settings.save_shape();
+					//	}
+					//}
+				}
+			}
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30);
+
+			if (back.IsPressed(GetMousePosition())) {
+				current_state = GameState::state_shape_select;
+
+			}
+			BeginDrawing();
+
+			draw_shape_screen(windowHeight, windowWidth, shape_screen_id);
+			select.Draw(GetMousePosition(), false);
+			back.Draw(GetMousePosition(), false);
+			if (unlocked&&(shapes[shape_screen_id].level<2)) {
+				upgrade.Draw(GetMousePosition(), false);
+			}
 			EndDrawing();
 			if (IsKeyPressed(KEY_Z)) {
 				current_state = GameState::STATE_MENU;
 			}
-
-
 			break;
 		}
 		case GameState::state_settings_menu: {
 			settings_menu.Update();
 			int setting_selected = settings_menu.get_data();
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30);
+
+			if (back.IsPressed(GetMousePosition())) {
+				current_state = GameState::STATE_MENU;
+
+			}
 			BeginDrawing();
 			ClearBackground(DARKBLUE);
+			draw_background(windowWidth, windowHeight);
+			back.Draw(GetMousePosition(), false);
 			settings_menu.Draw(windowWidth, windowHeight, "setting");
 			if (settings_menu.entered()) {
 				switch (setting_selected) {
@@ -1387,6 +1788,7 @@ int main() {
 						SetTargetFPS(FPS_array[index]);
 						settings.targetFPS = FPS_array[index];
 						settings.save();
+						settings_menu.reset_sm();
 					}
 					break;
 				}
@@ -1402,8 +1804,8 @@ int main() {
 						SetTextureFilter(canvas.texture, TEXTURE_FILTER_BILINEAR);
 						settings.scale = current_scale;
 						settings.save();
+						settings_menu.reset_sm();
 					}
-
 
 					break;
 				}
@@ -1413,12 +1815,15 @@ int main() {
 				}
 			}
 
-
 			string ceva = "Press Enter twice to confirm changes";
 			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.35, 20, RAYWHITE);
+			ceva = "Press Z to go back";
+			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.35+30, 20, RAYWHITE);
 			DrawFPS(10, 10);
 			EndDrawing();
 			if (IsKeyPressed(KEY_Z)) {
+				settings_menu.Reset();
+				settings_menu.reset_sm();
 				current_state = GameState::STATE_MENU;
 
 			}
@@ -1428,7 +1833,8 @@ int main() {
 		}
 		case GameState::STATE_lobby: {
 			BeginDrawing();
-			ClearBackground(DARKBLUE);
+			draw_background(windowWidth, windowHeight);
+
 			if (IsKeyDown(KEY_B)) {
 				force_connect ceva;
 				ENetPacket* packet = enet_packet_create(&ceva, sizeof(force_connect), ENET_PACKET_FLAG_RELIABLE);
@@ -1439,7 +1845,7 @@ int main() {
 			EndDrawing();
 			break;
 		}
-		case GameState::STATE_PLAYING: {
+		case GameState::STATE_PLAYING:{
 			player_input input = movement_float(IsGamepadAvailable(0));
 			if (my_id != -1) {
 				SendInputToServer(peer, input);
@@ -1465,10 +1871,10 @@ int main() {
 			}
 			projectiles.clear();
 			BeginDrawing();
-			ClearBackground(MAROON);
+			draw_background(windowWidth, windowHeight);
 			DrawText("GAME OVER!", windowWidth / 2 - 160, windowHeight / 3, 30, WHITE);
 			DrawText(TextFormat("Your rank: %d", my_result), windowWidth / 2 - 160, windowHeight / 2.5, 30, WHITE);
-			DrawText(TextFormat("Got: %d trophies and %d coins", trophies_got, coins_got), windowWidth / 2 - 160, windowHeight / 2.25, 30, WHITE);
+			DrawText(TextFormat("Got: %d quanta and %d reals", trophies_got, coins_got), windowWidth / 2 - 160, windowHeight / 2.25, 30, WHITE);
 			DrawText("PRESS [ENTER] TO RETURN TO MENU", windowWidth / 2 - 160, windowHeight / 2, 18, GRAY);
 			EndDrawing();
 			if (IsKeyPressed(KEY_ENTER)) {
