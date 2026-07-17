@@ -256,6 +256,7 @@ const float scale_array[6] = {
 	0.5
 };
 int pl_width = 96;
+float scale_text = 1.0f;
 struct player {
 	int health{};
 	shape_ch shape;
@@ -821,7 +822,7 @@ public:
 	button(float x, float y, float width, float height, const char* buttonText, int size) {
 		bounds = { x, y, width, height };
 		baseColor = RED;
-		hoverColor = YELLOW;
+		hoverColor = Color{ 215,215,0,255 };
 		activeColor = BLACK;
 		text = buttonText;
 		fontSize = size;
@@ -939,11 +940,11 @@ public:
 		
 	}
 	void Draw(int windowWidth, int windowHeight, string menu_name) {
-		int text_width = MeasureText(TextFormat("Select a %s",menu_name.c_str()), 50);
-		DrawText(TextFormat("Select a %s", menu_name.c_str()), windowWidth / 2 - text_width / 2, windowHeight / 3, 50, YELLOW);
+		int text_width = MeasureText(TextFormat("Select a %s",menu_name.c_str()), 50 * scale_text);
+		DrawText(TextFormat("Select a %s", menu_name.c_str()), windowWidth / 2 - text_width / 2, windowHeight / 3, 50*scale_text, YELLOW);
 		Vector2 mousePos = GetMousePosition();
 		for (size_t i = 0; i < map_menu.size(); i++) {
-			button button(windowWidth / 2 - 125, windowHeight / 2 + 30 * i, 250, 25, map_menu[i].name.c_str(), 20);
+			button button(windowWidth / 2 - 125 * scale_text, windowHeight / 2 + 30 * scale_text * i, 250 * scale_text, 25 * scale_text, map_menu[i].name.c_str(), 20 * scale_text);
 			button.Draw(mousePos, map_menu[i].selected);
 			if (button.IsPressed(mousePos)) {
 				main_menu_index = i;
@@ -962,7 +963,7 @@ public:
 			int sub_x = windowWidth / 2 + 130;
 			int sub_y = windowHeight / 2;
 			if (active_subs[0].name == "toggle") {
-				button button(windowWidth / 2 + 130, windowHeight / 2 + 30, 25, 25, "", 20);
+				button button(windowWidth / 2 + 130 * scale_text, windowHeight / 2 + 30 * scale_text, 25 * scale_text, 25 * scale_text, "", 20 * scale_text);
 				button.Draw(mousePos, active_subs[0].selected);
 				if (button.IsPressed(mousePos)) {
 					submenu_index = 0;
@@ -974,7 +975,7 @@ public:
 			}
 			else {
 				for (size_t i = 0; i < active_subs.size(); i++) {
-					button button(windowWidth / 2 + 130, windowHeight / 2 + 30 * i, 250, 25, active_subs[i].name.c_str(), 20);
+					button button(windowWidth / 2 + 130 * scale_text, windowHeight / 2 + 30 * scale_text * i, 250 * scale_text, 25 * scale_text, active_subs[i].name.c_str(), 20 * scale_text);
 					button.Draw(mousePos, active_subs[i].selected);
 					if (button.IsPressed(mousePos)) {
 						submenu_index = i;
@@ -1035,7 +1036,7 @@ public:
 	void draw() {
 		DrawRectangleRounded(card, 0.2, 255, BLUE);
 		draw_shape_menu(id, 1.4*height, 1.4*width, x + width / 2, y + height / 2.3-8);
-		DrawText(shapes[id].name.c_str(), x + width / 2 - MeasureText(shapes[id].name.c_str(), 40)/2,y+height-50, 40, RAYWHITE);
+		DrawText(shapes[id].name.c_str(), x + width / 2 - MeasureText(shapes[id].name.c_str(), 30 * scale_text)/2,y+height- 33 * scale_text, 30 * scale_text, RAYWHITE);
 	}
 	bool is_pressed() {
 		return CheckCollisionPointRec(GetMousePosition(), card) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
@@ -1122,16 +1123,71 @@ void draw_background(int window_width, int window_height) {
 }
 void draw_shape_screen(int win_h, int win_w, int id) {
 	draw_background(win_w, win_h);
-	DrawText(shapes[id].name.c_str(), win_w / 3 - MeasureText(shapes[id].name.c_str(), 100) / 2+10, 10, 100, RAYWHITE);
+	DrawText(shapes[id].name.c_str(), win_w / 3 - MeasureText(shapes[id].name.c_str(), 60 * scale_text) / 2+10, 10, 60 * scale_text, RAYWHITE);
 	draw_shape_menu(id, win_h, win_w, win_w / 3 + 10, win_h / 2);
 	Rectangle stats = { (float)win_w - win_w / 3.0f - 10, 10, (float)win_w / 3.0f,(float)win_h - 20 };
 	DrawRectangleRounded(stats, 0.1, 255, BLUE);
 	string ceva = "Level " + std::to_string(shapes[id].level+1);
-	DrawText(ceva.c_str(), win_w - win_w / 6 - MeasureText(ceva.c_str(), 60) / 2-10, 20, 60, RAYWHITE);
+	float font_size = 45 * scale_text;
+	float text_width = MeasureText(ceva.c_str(), font_size);
+	DrawText(ceva.c_str(), win_w - win_w / 6 - text_width / 2-10, 20, font_size, RAYWHITE);
 	ceva = "Health: " + std::to_string(shapes[id].levels[shapes[id].level].health);
-	DrawText(ceva.c_str(), win_w - win_w / 6 - MeasureText(ceva.c_str(), 60) / 2-10, 20+80, 60, RAYWHITE);
+	text_width = MeasureText(ceva.c_str(), font_size);
+	DrawText(ceva.c_str(), win_w - win_w / 6 - text_width / 2-10, 40+ font_size, font_size, RAYWHITE);
 	ceva = "Damage: " + std::to_string(shapes[id].levels[shapes[id].level].ammo_damage);
-	DrawText(ceva.c_str(), win_w - win_w / 6 - MeasureText(ceva.c_str(), 60) / 2-10, 20 + 180, 60, RAYWHITE);
+	text_width = MeasureText(ceva.c_str(), font_size);
+	DrawText(ceva.c_str(), win_w - win_w / 6 - text_width / 2-10, 60 + 2* font_size, font_size, RAYWHITE);
+}
+
+void draw_imaginaries(int x, int y, int w, Font font) {
+	Color circle_disk = VIOLET, i_color= PURPLE, lines_color= DARKPURPLE ;
+	DrawCircle(x, y, w/2, circle_disk);
+	float ring_thickness = w / 30 + w / 20;
+	DrawRing(Vector2{ (float)x,(float)y }, w/2 - ring_thickness, w/2, 0, 360, 1024, lines_color);
+	float rawGlyphHeight = font.recs[1].height;
+	float rawGlyphOffsetY = (float)font.glyphs[1].offsetY;
+	float scaleFactor = w / (float)font.baseSize;
+	float exactVisualHeight = rawGlyphHeight * scaleFactor;
+	DrawTextEx(font, "i", Vector2{ (float)x - MeasureTextEx(font, "i", w , 0.0f).x / 2.0f , (float)y - exactVisualHeight/2.0f - (rawGlyphOffsetY * scaleFactor) }, w, 0, i_color);
+}
+void draw_reals(int x, int y, int w, Font font) {
+	Color circle_disk ={ 215,215,0,255 }, r_color = WHITE, lines_color = GRAY;
+	lines_color.a = 200;
+	DrawCircle(x, y, w / 2, circle_disk);
+	float ring_thickness = w / 30 + w / 20;
+
+	DrawRing(Vector2{ (float)x,(float)y }, w / 2 - ring_thickness, w / 2, 0, 360, 1024, lines_color);
+	float rawGlyphHeight = font.recs[0].height;
+	float rawGlyphOffsetY = (float)font.glyphs[0].offsetY;
+	float scaleFactor = w / 1.2f / (float)font.baseSize;
+	float exactVisualHeight = rawGlyphHeight * scaleFactor;
+	DrawTextEx(font, "R", Vector2{ (float)x - MeasureTextEx(font, "R", w / 1.2f , 0.0f).x / 2.0f , (float)y - exactVisualHeight / 2.0f - (rawGlyphOffsetY * scaleFactor) }, w/1.2f, 0, r_color);
+}
+void draw_quanta(int x, int y, int w) {
+	Color circle_disk = BLACK,lines_color = DARKBLUE, wave1_color=PURPLE, wave2_color = VIOLET;
+	lines_color.a = 169;
+	DrawCircle(x, y, w / 2, circle_disk);
+	float ring_thickness = w / 30 + w / 20;
+	DrawRing(Vector2{ (float)x,(float)y }, w / 2- ring_thickness, w / 2, 0, 360, 1024, lines_color);
+
+	std::vector<Vector2> points;
+	for (int i = 0; i < w - ring_thickness * 2; i++) {
+		float phase = i / (float)(w - ring_thickness * 2) * 2 * PI;
+		float point_y = std::sin(phase) * w / 3.1f;
+		points.push_back({ (float)x - w / 2 + i + ring_thickness,y + point_y });
+	}
+	for (int i = 0; i < points.size() - 1; i++) {
+		DrawLineEx(points[i], points[i + 1], w / 40, wave1_color);
+	}
+	points.clear();
+	for (int i = 0; i < w- ring_thickness*2; i++) {
+		float phase = i / (float)(w-ring_thickness*2) * 2 * PI;
+		float point_y = std::sin(phase) * w / 6.2f;
+		points.push_back({ (float)x - w / 2 + i+ ring_thickness,y + point_y });
+	}
+	for (int i = 0; i < points.size()-1; i++) {
+		DrawLineEx(points[i], points[i+1],(float) w / 40, wave2_color);
+	}
 }
 int main() {
 	bool active = true;
@@ -1224,6 +1280,26 @@ int main() {
 	RenderTexture2D canvas = LoadRenderTexture(virtualWidth, virtualHeight);
 	SetTextureFilter(canvas.texture, TEXTURE_FILTER_BILINEAR);
 
+
+	int codepoints[] = { 0x0052 ,0x0069 };
+	int glyphCount = 2;
+	int baseSize = 256;
+	int padding = 0;
+	int fileDataSize = 0;
+	unsigned char* fileData = LoadFileData("IR-Regular.ttf", &fileDataSize);
+	Font i_font = { 0 };
+	i_font.baseSize = baseSize;
+	i_font.glyphCount = glyphCount;
+	i_font.glyphPadding = padding;
+	if (fileData != nullptr) {
+		i_font.glyphs = LoadFontData(fileData, fileDataSize, baseSize, codepoints, glyphCount, FONT_DEFAULT, &glyphCount);
+		Image atlas = GenImageFontAtlas(i_font.glyphs, &i_font.recs, glyphCount, baseSize, padding, 0);
+		i_font.texture = LoadTextureFromImage(atlas);
+		UnloadImage(atlas);
+		UnloadFileData(fileData); 
+	}
+	SetTextureFilter(i_font.texture, TEXTURE_FILTER_BILINEAR);
+
 	int players_waiting=0;
 	int my_result = 0;
 	int my_shape_id=settings.last_shape_id;
@@ -1270,6 +1346,9 @@ int main() {
 		}
 		int windowWidth = GetScreenWidth();
 		int windowHeight = GetScreenHeight();
+		if (windowHeight / 1080.0f != scale_text) {
+			scale_text = windowWidth / 1080.0f;
+		}
 		while (enet_host_service(client, &event, 0) > 0) {
 			switch (event.type) {
 			case ENET_EVENT_TYPE_RECEIVE: {
@@ -1372,7 +1451,7 @@ int main() {
 			bool selected = false;
 			int option = -1;
 			Vector2 mousePos = GetMousePosition();
-			DrawText("Geomatrix", windowWidth / 2 - MeasureText("Geomatrix", 80) /2, windowHeight / 13, 80, YELLOW);
+			DrawText("Geomatrix", windowWidth / 2 - MeasureText("Geomatrix", 80 * scale_text) /2, windowHeight / 13, 80 * scale_text, YELLOW);
 			string map_name = maps_id_name.find(current_map.id)->second + " map";
 
 			for (int i = 0; i < 4; i++) {
@@ -1380,21 +1459,21 @@ int main() {
 				switch (i) {
 				case 0: {
 					button.bounds = { (float)windowWidth - 10 - windowWidth / 3.69f,(float) windowHeight-10-windowHeight/8, (float)windowWidth / 3.69f,(float)windowHeight / 8 };
-					button.fontSize = 60;
+					button.fontSize = 60 * scale_text;
 					button.hoverColor = Color{ 215,215,0,255 };
 					button.corner_r = 0.4;
 					break;
 				}
 				case 1: {
 					button.bounds = { (float) 10,(float)windowHeight - 10 - windowHeight / 8, (float)windowWidth / 3.69f,(float)windowHeight / 8 };
-					button.fontSize = 40;
+					button.fontSize = 40 * scale_text;
 					button.hoverColor = Color{ 215,215,0,255 };
 					button.corner_r = 0.4;
 					break;
 				}
 				case 2: {
 					button.bounds = { (float)windowWidth / 3.69f+20,(float)windowHeight - 10 - windowHeight / 8, (float)windowWidth- 2* windowWidth / 3.69f-40,(float)windowHeight / 8 };
-					button.fontSize = 40;
+					button.fontSize = 40 * scale_text;
 					button.hoverColor = Color{ 215,215,0,255 };
 					button.corner_r = 0.4;
 					button.text = map_name.c_str();
@@ -1402,8 +1481,8 @@ int main() {
 					break;
 				}
 				case 3:{
-					button.bounds = { (float)windowWidth-10- windowWidth / 5.69f,(float)10, (float)windowWidth / 5.69f,(float)windowHeight / 12 };
-					button.fontSize = 40;
+					button.bounds = { (float)windowWidth-10- windowWidth / 5.69f/2,(float)10, (float)windowWidth / 5.69f/2,(float)windowHeight / 12/2 };
+					button.fontSize = 20 * scale_text;
 					button.hoverColor = Color{ 215,215,0,255 };
 					button.corner_r = 0.4;
 					break;
@@ -1450,11 +1529,42 @@ int main() {
 					}
 				}
 			}
-			
-			DrawRectangleRounded(Rectangle{(float)windowWidth-windowWidth/5.69f - 260, 10, 240,60},0.2,255,RED);
-			DrawText(TextFormat("%d reals", settings.reals), (float)windowWidth - windowWidth / 5.69f - 140- MeasureText(TextFormat("%d reals", settings.reals),40)/2, 20, 40,RAYWHITE );
-			DrawRectangleRounded(Rectangle{ 10, 10, 280,60 }, 0.2, 255, RED);
-			DrawText(TextFormat("%d quanta", settings.quanta), (float)10+280/2.0f- MeasureText(TextFormat("%d quanta", settings.quanta), 40) / 2, 20, 40, RAYWHITE);
+			float rec_w = 100 * scale_text;
+			float rec_h = 25 * scale_text;
+			float rec_x= windowWidth - windowWidth / 5.69f/2 - 20 - rec_w;
+			float rec_y= 10;
+			float font_size = 20 * scale_text;
+			float visual_y_offset = 1.0f * scale_text;
+			float icon_w = 30 * scale_text;
+			int text_width = MeasureText(TextFormat("%d", settings.reals), 20 * scale_text);
+			DrawRectangleRounded(Rectangle{ rec_x, rec_y, rec_w,rec_h },0.4,255,RED);
+			DrawText(TextFormat("%d", settings.reals), rec_x + rec_w/2 - text_width /2, rec_y + (rec_h - font_size)/2+ visual_y_offset, font_size,WHITE );
+			draw_reals(rec_x, rec_y + icon_w/2 - 2.5 * scale_text, icon_w, i_font);
+
+			rec_w = 100 * scale_text;
+			rec_h = 25 * scale_text;
+			rec_x = rec_x - rec_w - 10- icon_w/2;
+			rec_y = 10;
+			font_size = 20 * scale_text;
+			visual_y_offset = 1.0f * scale_text;
+			icon_w = 30 * scale_text;
+			text_width = MeasureText(TextFormat("%d", settings.reals), 20 * scale_text);
+			DrawRectangleRounded(Rectangle{ rec_x, rec_y, rec_w,rec_h }, 0.4, 255, RED);
+			DrawText(TextFormat("%d", settings.imaginaries), rec_x + rec_w / 2 - text_width / 2, rec_y + (rec_h - font_size) / 2 + visual_y_offset, font_size, WHITE);
+			draw_imaginaries(rec_x, rec_y + icon_w / 2 - 2.5 * scale_text, icon_w, i_font);
+
+
+			rec_w = 200 * scale_text;
+			rec_h = 40 * scale_text;
+			rec_x = 10;
+			rec_y = 10;
+			font_size = 30 * scale_text;
+			visual_y_offset = 1.0f * scale_text;
+			icon_w = 30 * scale_text;
+			text_width = MeasureText(TextFormat("%d", settings.quanta), 40 * scale_text);
+			DrawRectangleRounded(Rectangle{ rec_x, rec_y, rec_w,rec_h }, 0.2, 255, RED);
+			DrawText(TextFormat("%d", settings.quanta), rec_x + rec_w / 2 -  text_width/ 2, rec_y+ (rec_h - font_size) / 2 + visual_y_offset, font_size, RAYWHITE);
+			draw_quanta(rec_x + rec_w, rec_y + rec_h / 2, rec_h + 5 * scale_text);
 
 
 			Rectangle bounds = {windowWidth-300,windowHeight-150,200,100};
@@ -1476,23 +1586,24 @@ int main() {
 				pop_exit.Draw(GetMousePosition(), false);
 
 				string ceva = "Controls";
-				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 50) / 2, pop_y + 20, 50, WHITE);
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 50 * scale_text) / 2, pop_y + 20, 50 * scale_text, WHITE);
 				ceva = "W A S D for moving";
-				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, pop_y+90, 20, RAYWHITE);
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, pop_y+90, 20 * scale_text, RAYWHITE);
 				ceva = "Arrow keys for aiming";
-				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, pop_y+120, 20, RAYWHITE);
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, pop_y+120, 20 * scale_text, RAYWHITE);
 				ceva = "press E to shoot";
-				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, pop_y+150, 20, RAYWHITE);
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, pop_y+150, 20 * scale_text, RAYWHITE);
 				ceva = "Useful controls for testing";
-				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 30) / 2, windowHeight/2, 30, RAYWHITE);
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 30 * scale_text) / 2, windowHeight/2, 30 * scale_text, RAYWHITE);
 				ceva = "press Z to go back to the start menu";
-				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight/2 + 50, 20, RAYWHITE);
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, windowHeight/2 + 50, 20 * scale_text, RAYWHITE);
 				ceva = "press x to exit the game client";
-				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 2 + 80, 20, RAYWHITE);
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, windowHeight / 2 + 80, 20 * scale_text, RAYWHITE);
 				ceva = "press B to enter a match without connecting the total number of players";
-				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 2 + 110, 20, RAYWHITE);
+				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, windowHeight / 2 + 110, 20 * scale_text, RAYWHITE);
 			}
 			DrawFPS(10, 10);
+
 			EndDrawing();
 			if (IsKeyPressed(KEY_ENTER)) {
 				for (int i = 0; i < 4; i++) {
@@ -1574,7 +1685,7 @@ int main() {
 				}
 				
 			}	
-			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30);
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30 * scale_text);
 
 			if (back.IsPressed(GetMousePosition())) {
 				current_state = GameState::STATE_MENU;
@@ -1593,7 +1704,7 @@ int main() {
 			break;
 		}
 		case GameState::state_shape_select: {
-			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30);
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30*scale_text);
 			if (back.IsPressed(GetMousePosition())) {
 				current_state = GameState::STATE_MENU;
 
@@ -1652,9 +1763,9 @@ int main() {
 				}
 			}
 
-			button select(windowWidth - windowWidth / 3, windowHeight - windowHeight / 6-20, windowWidth / 3-20, windowHeight / 6,TextFormat("%d reals",shapes_price_reals_array[shape_screen_id]), 50);
+			button select(windowWidth - windowWidth / 3, windowHeight - windowHeight / 6-20, windowWidth / 3-20, windowHeight / 6,TextFormat("%d reals",shapes_price_reals_array[shape_screen_id]), 50 * scale_text);
 			select.corner_r = 0.269;
-			button upgrade(windowWidth - windowWidth / 3, windowHeight - 2*windowHeight / 6 - 30, windowWidth / 3 - 20, windowHeight / 6, TextFormat("%d reals", level_up_prices[shapes[shape_screen_id].level]), 50);
+			button upgrade(windowWidth - windowWidth / 3, windowHeight - 2*windowHeight / 6 - 30, windowWidth / 3 - 20, windowHeight / 6, TextFormat("%d reals", level_up_prices[shapes[shape_screen_id].level]), 50 * scale_text);
 			upgrade.corner_r = 0.269;
 			int img_price=0;
 			bool img_pop_up=false;
@@ -1707,7 +1818,7 @@ int main() {
 					//}
 				}
 			}
-			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30);
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30 * scale_text);
 
 			if (back.IsPressed(GetMousePosition())) {
 				current_state = GameState::state_shape_select;
@@ -1730,7 +1841,7 @@ int main() {
 		case GameState::state_settings_menu: {
 			settings_menu.Update();
 			int setting_selected = settings_menu.get_data();
-			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30);
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30 * scale_text);
 
 			if (back.IsPressed(GetMousePosition())) {
 				current_state = GameState::STATE_MENU;
@@ -1816,9 +1927,9 @@ int main() {
 			}
 
 			string ceva = "Press Enter twice to confirm changes";
-			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.35, 20, RAYWHITE);
+			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, windowHeight / 1.35, 20 * scale_text, RAYWHITE);
 			ceva = "Press Z to go back";
-			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20) / 2, windowHeight / 1.35+30, 20, RAYWHITE);
+			DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, windowHeight / 1.35+30, 20 * scale_text, RAYWHITE);
 			DrawFPS(10, 10);
 			EndDrawing();
 			if (IsKeyPressed(KEY_Z)) {
@@ -1840,8 +1951,8 @@ int main() {
 				ENetPacket* packet = enet_packet_create(&ceva, sizeof(force_connect), ENET_PACKET_FLAG_RELIABLE);
 				enet_peer_send(peer, 0, packet);
 			}
-			DrawText("Waiting for players", windowWidth / 2 - 180, windowHeight / 3, 30, YELLOW);
-			DrawText(TextFormat("%d / %d", players_waiting, current_map.pl_nr), windowWidth / 2 - 150, windowHeight / 2, 20, RAYWHITE);
+			DrawText("Waiting for players", windowWidth / 2 - MeasureText("Waiting for players", 30 * scale_text)/2, windowHeight / 3, 30 * scale_text, YELLOW);
+			DrawText(TextFormat("%d / %d", players_waiting, current_map.pl_nr), windowWidth / 2 - MeasureText(TextFormat("%d / %d", players_waiting, current_map.pl_nr), 20 * scale_text)/2, windowHeight / 2, 20 * scale_text, RAYWHITE);
 			EndDrawing();
 			break;
 		}
@@ -1872,10 +1983,10 @@ int main() {
 			projectiles.clear();
 			BeginDrawing();
 			draw_background(windowWidth, windowHeight);
-			DrawText("GAME OVER!", windowWidth / 2 - 160, windowHeight / 3, 30, WHITE);
-			DrawText(TextFormat("Your rank: %d", my_result), windowWidth / 2 - 160, windowHeight / 2.5, 30, WHITE);
-			DrawText(TextFormat("Got: %d quanta and %d reals", trophies_got, coins_got), windowWidth / 2 - 160, windowHeight / 2.25, 30, WHITE);
-			DrawText("PRESS [ENTER] TO RETURN TO MENU", windowWidth / 2 - 160, windowHeight / 2, 18, GRAY);
+			DrawText("GAME OVER!", windowWidth / 2 - 160, windowHeight / 3, 30 * scale_text, WHITE);
+			DrawText(TextFormat("Your rank: %d", my_result), windowWidth / 2 - 160, windowHeight / 2.5, 30 * scale_text, WHITE);
+			DrawText(TextFormat("Got: %d quanta and %d reals", trophies_got, coins_got), windowWidth / 2 - 160, windowHeight / 2.25, 30 * scale_text, WHITE);
+			DrawText("PRESS [ENTER] TO RETURN TO MENU", windowWidth / 2 - 160, windowHeight / 2, 18 * scale_text, GRAY);
 			EndDrawing();
 			if (IsKeyPressed(KEY_ENTER)) {
 				current_state = GameState::STATE_MENU;
