@@ -7,7 +7,7 @@ using std::string;
 #pragma pack(push, 1)
 #define MAX_PLAYERS 10
 #define MAX_PROJECTILES 100
-#define PACKET_SIZE 884
+#define PACKET_SIZE 894
 enum class PacketType : uint8_t {
 	ID_ASSIGNMENT = 0,
 	WORLD_STATE = 1,
@@ -80,11 +80,14 @@ std::unordered_map<int, string>maps = {
 };
 int trophy_payout[10] = {26,18,13,9,6,2,-2,-6,-9,-11};
 int coin_payout[10] = { 100,79,69,50,38,26,21,16,10,6};
+int trophy_payout_team[2] = { 22, -8 };
+int coin_payout_team[2] = {90, 12};
 struct map {
 	int height{};
 	int width{};
 	int scale{};
 	int pl_nr{};
+	int team_mode{};
 	std::vector<std::vector<int>> matrix;
 	std::vector<std::vector<int>> pl_pos;
 	bool load_file(const std::string& filepath) {
@@ -93,7 +96,7 @@ struct map {
 			std::cerr << "Error loading map file: " << filepath << "\n";
 			return false;
 		}
-		file >> height >> width >> scale>>pl_nr;
+		file >> height >> width >> scale>>pl_nr >> team_mode;
 		matrix.clear();
 		matrix.resize(height, std::vector<int>(width, 0));
 		pl_pos.clear();
@@ -144,10 +147,10 @@ shape_ch shapes[3] = {
 		.range = 400,
 		.ammo = 12,
 		.ammo_r = 26,
-		.ammo_speed = 400,
+		.ammo_speed = 1400,
 		.reload_time = 0.5f,
 		.levels = {
-			{.health = 1000, .ammo_damage =100 },
+			{.health = 1000, .ammo_damage = 100 },
 			{.health = 1200, .ammo_damage = 120 },
 			{.health = 1450, .ammo_damage = 145 },
 		}
@@ -159,7 +162,7 @@ shape_ch shapes[3] = {
 		.range = 300,
 		.ammo = 6,
 		.ammo_r = 56,
-		.ammo_speed = 500,
+		.ammo_speed = 1500,
 		.reload_time = 0.4f,
 		.levels = {
 			{.health = 1500, .ammo_damage = 65 },
@@ -174,7 +177,7 @@ shape_ch shapes[3] = {
 		.range = 600,
 		.ammo = 26,
 		.ammo_r = 26,
-		.ammo_speed = 500,
+		.ammo_speed = 1500,
 		.reload_time = 0.5f,
 		.levels = {
 			{.health = 1250, .ammo_damage = 150 },
@@ -280,15 +283,27 @@ bool aim(map& map, player(&players)[MAX_PLAYERS], projectile& pr, float d_time) 
 	pr.pos_x = pr.new_x;
 	pr.pos_y = pr.new_y;
 	for (int i = 0; i < map.pl_nr; i++) {
-		if ((pr.id != i)&&players[i].active) {
-			if ((abs(players[i].pos_x - pr.pos_x) <= distance_min) &&(abs(players[i].pos_y - pr.pos_y) <= distance_min)) {
-				players[i].health -= pr.damage;
-				if (players[i].health <= 0) {
-					players[i].active = false;
-				}
-				return false;
+		bool can_take_damage = true;
+		if (map.team_mode == 1) {
+			if ((i < map.pl_nr / 2)&&(pr.id<map.pl_nr/2)) {
+				can_take_damage = false;
+			}
+			else if ((i > map.pl_nr / 2) && (pr.id > map.pl_nr/2)) {
+				can_take_damage = false;
 			}
 		}
+		if (can_take_damage) {
+			if ((pr.id != i) && players[i].active) {
+				if ((abs(players[i].pos_x - pr.pos_x) <= distance_min) && (abs(players[i].pos_y - pr.pos_y) <= distance_min)) {
+					players[i].health -= pr.damage;
+					if (players[i].health <= 0) {
+						players[i].active = false;
+					}
+					return false;
+				}
+			}
+		}
+
 	}
 	return true;
 }
@@ -380,6 +395,7 @@ void simulation_pl_pr(map& map,player (&players)[MAX_PLAYERS], std::vector<proje
 		}
 	}
 }
+//handles the packet sending during the match
 void network_pl_pr(map& map, player(&players)[MAX_PLAYERS], std::vector<projectile>& projectiles, int max_view_x, int max_view_y) {
 	for (int i = 0; i < map.pl_nr; i++) {
 		if ((players[i].connected) && (players[i].active)) {
@@ -481,6 +497,10 @@ void network_pl_pr(map& map, player(&players)[MAX_PLAYERS], std::vector<projecti
 	}
 
 }
+
+
+
+
 int main() {
 	bool active = true;
 	player players[MAX_PLAYERS];
@@ -644,17 +664,15 @@ int main() {
 				break;
 			}
 			case ENET_EVENT_TYPE_DISCONNECT: {
-				if (event.peer->data != nullptr) {
-					uintptr_t disconnected_player = reinterpret_cast<uintptr_t>(event.peer->data);
-					cout << "Player " << disconnected_player << " disconnected." << std::endl;
-					for (int i = 0; i < current_map.pl_nr;i++) {
-						if (players[i].peer == players[disconnected_player].peer) {
-							players[i].connected=false;
-							players[i].peer = nullptr;
-							break; 
-						}
+				for (int i = 0; i < current_map.pl_nr; i++) {
+					if (players[i].peer == event.peer) {
+						cout << "Player " << players[i].id << " disconnected." << std::endl;
+						players[i].peer = nullptr;
+						players[i].connected = false;
+						break;
 					}
 				}
+				
 				if ((connected_count == 0)&&(current_state==ServerState::MATCH_IN_PROGRESS)) {
 					current_state = ServerState::GAME_OVER;
 				}
@@ -670,10 +688,13 @@ int main() {
 		last_time = current_time;
 		accumulated_time += elapsed.count();
 		while (accumulated_time >= tick_time){	
-			if (current_state == ServerState::LOBBY) {
+			switch (current_state) {
+			case ServerState::LOBBY: {
 				int connected_d = 0;
-				for (int i = 0; i < current_map.pl_nr;i++) {
-					if (players[i].connected) connected_d++;
+				for (int i = 0; i < current_map.pl_nr; i++) {
+					if (players[i].connected) {
+						connected_d++;
+					}
 				}
 				if (connected_d != connected_count) {
 					connected_count = connected_d;
@@ -682,7 +703,7 @@ int main() {
 					ENetPacket* count_pack = enet_packet_create(&count, sizeof(lobby_count), ENET_PACKET_FLAG_RELIABLE);
 					enet_host_broadcast(server, 0, count_pack);
 				}
-				if ((connected_count == 6)||(connect_anyway)) {
+				if ((connected_count == current_map.pl_nr) || (connect_anyway)) {
 					current_state = ServerState::MATCH_IN_PROGRESS;
 
 					MatchStatePacket state_pkt{ .new_state = static_cast<uint8_t>(ServerState::MATCH_IN_PROGRESS) };
@@ -690,59 +711,136 @@ int main() {
 					enet_host_broadcast(server, 0, packet);
 					cout << "Match automatically started with " << connected_count << " players!\n";
 				}
+				break;
 			}
-			else if (current_state == ServerState::MATCH_IN_PROGRESS) {
-				int connections=0;
+			case ServerState::MATCH_IN_PROGRESS: {
+				int connections = 0;
 				for (int i = 0; i < current_map.pl_nr; i++) {
-					if (players[i].connected) connections++;
+					if (players[i].connected) { 
+						connections++; 
+					}
 				}
 				connected_count = connections;
 				if (connections == 0) {
 					current_state = ServerState::GAME_OVER;
 					break;
 				}
-				simulation_pl_pr(current_map,players, projectiles, tick_time, projectile_ids);
+				simulation_pl_pr(current_map, players, projectiles, tick_time, projectile_ids);
 				int alive_count = 0;
-				int last_alive_id = -1;
+				int last_alive_id = 0;
 				for (int i = 0; i < current_map.pl_nr; i++) {
-					if (players[i].active&& players[i].health > 0) {
+					if (players[i].active && players[i].health > 0) {
 						alive_count++;
 						last_alive_id = players[i].id;
 					}
 				}
 				for (int i = 0; i < current_map.pl_nr; i++) {
 					if (players[i].health <= 0) {
-						if (players[i].connected) {
-							cout << "Sending packet to Player " << players[i].id << " with rank " << (alive_count + 1) << std::endl;
-							MatchStatePacket win_pkt{
-								.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
-								.position = static_cast<uint8_t>(alive_count + 1),
-								.trophies = static_cast<int8_t>(trophy_payout[alive_count]),
-								.coins = static_cast<uint8_t>(coin_payout[alive_count])
-							};
-							ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
-							enet_peer_send(players[i].peer, 0, packet);
-							players[i].connected = false;
+						if (current_map.team_mode == 0) {
+							if (players[i].connected) {
+								cout << "Sending packet to Player " << players[i].id << " with rank " << (alive_count + 1) << std::endl;
+								MatchStatePacket win_pkt{
+									.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
+									.position = static_cast<uint8_t>(alive_count + 1),
+									.trophies = static_cast<int8_t>(trophy_payout[alive_count]),
+									.coins = static_cast<uint8_t>(coin_payout[alive_count])
+								};
+								ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+								enet_peer_send(players[i].peer, 0, packet);
+								players[i].connected = false;
+								players[i].active = false;
+							}
+							continue;
 						}
-						continue;
+						else if (current_map.team_mode == 1) {
+							players[i].active = false;
+						}
 					}
 				}
-				if (alive_count <= 1) {
-					current_state = ServerState::GAME_OVER;
-					MatchStatePacket win_pkt{
-								.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
-								.position = 1,
-								.trophies = static_cast<int8_t>(trophy_payout[0]),
-								.coins = static_cast<uint8_t>(coin_payout[0])
-					};
-					ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
-					enet_peer_send(players[last_alive_id].peer, 0, packet);
-					cout << "Game Over! Player " << last_alive_id << " wins the match.\n";
+				if (current_map.team_mode == 0) {
+					if (alive_count <= 1) {
+						current_state = ServerState::GAME_OVER;
+						MatchStatePacket win_pkt{
+									.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
+									.position = 1,
+									.trophies = static_cast<int8_t>(trophy_payout[0]),
+									.coins = static_cast<uint8_t>(coin_payout[0])
+						};
+						ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+						enet_peer_send(players[last_alive_id].peer, 0, packet);
+						cout << "Game Over! Player " << last_alive_id << " wins the match.\n";
+					}
 				}
+				else if (current_map.team_mode == 1) {
+					bool team_0_dead = true;
+					bool team_1_dead = true;
+					for (int i = 0; i < current_map.pl_pos.size() / 2; i++) {
+						if (players[i].active == true) { 
+							team_0_dead = false;
+						}
+					}
+					for (int i = current_map.pl_pos.size() / 2; i < current_map.pl_pos.size(); i++) {
+						if (team_0_dead) { 
+							team_1_dead = false;
+							break; 
+						}
+						if (players[i].active == true) {
+							team_1_dead = false;
+						}
+					}
+					if (team_0_dead|| team_1_dead ) {
+						current_state = ServerState::GAME_OVER;
+						MatchStatePacket win_pkt{
+									.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
+									.position = 1,
+									.trophies = static_cast<int8_t>(trophy_payout_team[0]),
+									.coins = static_cast<uint8_t>(coin_payout_team[0])
+						};
+						MatchStatePacket lose_pkt{
+									.new_state = static_cast<uint8_t>(ServerState::GAME_OVER),
+									.position = 2,
+									.trophies = static_cast<int8_t>(trophy_payout_team[1]),
+									.coins = static_cast<uint8_t>(coin_payout_team[1])
+						};
+						if (team_0_dead) {
+							for (int i = 0; i < current_map.pl_pos.size() / 2; i++) {
+								if (players[i].connected) {
+									ENetPacket* lose_packet = enet_packet_create(&lose_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+									enet_peer_send(players[i].peer, 0, lose_packet );
+								}
+							}
+							for (int i = current_map.pl_pos.size() / 2; i < current_map.pl_pos.size(); i++) {
+								if (players[i].connected) {
+									ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+									enet_peer_send(players[i].peer, 0, packet);
+								}
+							}
 
-				network_pl_pr(current_map, players, projectiles, max_view_x, max_view_y) ;
+							cout << "Game Over! Team" << 1 << " wins the match.\n";
+						}
+						else if (team_1_dead) {
+							for (int i = 0; i < current_map.pl_pos.size() / 2; i++) {
+								if (players[i].connected) {
+									ENetPacket* packet = enet_packet_create(&win_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+									enet_peer_send(players[i].peer, 0, packet);
+								}
+							}
+							for (int i = current_map.pl_pos.size() / 2; i < current_map.pl_pos.size(); i++) {
+								if (players[i].connected) {
+									ENetPacket* lose_packet = enet_packet_create(&lose_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
+									enet_peer_send(players[i].peer, 0, lose_packet);
+								}
+							}
+
+							cout << "Game Over! Team" << 0 << " wins the match.\n";
+						}
+					}
+				}
+				network_pl_pr(current_map, players, projectiles, max_view_x, max_view_y);
+				break;
+
 			}
-			else if (current_state == ServerState::GAME_OVER) {
+			case ServerState::GAME_OVER: {
 				cout << "Resetting server playground back to Lobby state...\n";
 				projectiles.clear();
 
@@ -762,6 +860,7 @@ int main() {
 				connected_count = 0;
 				current_state = ServerState::LOBBY;
 				break;
+			}
 			}
 			accumulated_time -= tick_time;
 		}
