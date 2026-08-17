@@ -78,7 +78,7 @@ std::unordered_map<int, string>maps = {
 	{0, "maps/default_map.txt"},
 	{1, "maps/ceva.txt"}
 };
-int trophy_payout[10] = {26,18,13,9,6,2,-2,-6,-9,-11};
+int trophy_payout[10] = {26,18,13,9,6,2 ,-2,-6,-9,-11};
 int coin_payout[10] = { 100,79,69,50,38,26,21,16,10,6};
 int trophy_payout_team[2] = { 22, -8 };
 int coin_payout_team[2] = {90, 12};
@@ -265,6 +265,12 @@ bool aim(map& map, player(&players)[MAX_PLAYERS], projectile& pr, float d_time) 
 		float length = std::sqrt(lengthSq);
 		pr.aim_x /= length; // Scale X down (becomes ~0.707) if needed, cause it is a little redundant
 		pr.aim_y /= length; // Scale Y down (becomes ~0.707) if needed, cause it is a little redundant
+	}
+
+	else if (lengthSq < 1.0f) {
+		float length = std::sqrt(lengthSq);
+		pr.aim_x *= 1.0f / length;
+		pr.aim_y *= 1.0f / length;
 	}
 	if((pr.aim_x==0)&&(pr.aim_y==0)) return false;
 	pr.pos_f_x += pr.aim_x * pr.speed * d_time;
