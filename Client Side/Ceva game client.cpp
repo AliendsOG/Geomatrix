@@ -10,7 +10,6 @@
 #undef ShowCursor
 #undef PlaySound
 #include "raylib.h"
-
 using std::cout;
 using std::string;
 //network stuff begin
@@ -118,16 +117,17 @@ struct map {
 	int width{};
 	int scale{};
 	int pl_nr{};
+	int team_mode{};
 	int id{};
 	std::vector<std::vector<int>> matrix;
 	std::vector<std::vector<int>> pl_pos;
-	bool load_file(const string& filepath) {
+	bool load_file(const std::string& filepath) {
 		std::ifstream file(filepath);
 		if (!file.is_open()) {
 			std::cerr << "Error loading map file: " << filepath << "\n";
 			return false;
 		}
-		file >> height >> width >> scale >> pl_nr;
+		file >> height >> width >> scale>>pl_nr >> team_mode;
 		matrix.clear();
 		matrix.resize(height, std::vector<int>(width, 0));
 		pl_pos.clear();
@@ -147,11 +147,6 @@ struct map {
 				}
 			}
 		}
-		if (pl_nr != (int)pl_pos.size()) {
-			std::cout << "Info: Corrected pl_nr from " << pl_nr
-				<< " to actual spawn nodes found: " << pl_pos.size() << "\n";
-			pl_nr = (int)pl_pos.size();
-		}
 
 		file.close();
 		return true;
@@ -165,6 +160,7 @@ struct shape_ch {
 	int id{};
 	string name{};
 	int level{};
+	int range{};
 	int health{};
 	std::array<level_stats, 3> levels;
 };
@@ -174,6 +170,7 @@ shape_ch shapes[3] = {
 		.id = 0,
 		.name = "Square",
 		.level = 0,
+		.range = 400,
 		.levels = {{
 			{1000, 100}, 
 			{1200, 120}, 
@@ -184,6 +181,7 @@ shape_ch shapes[3] = {
 		.id = 1,
 		.name = "Circle",
 		.level = 0,
+		.range = 300,
 		.levels = {{
 			{1500,  65 },
 			{1700,  80 },
@@ -194,6 +192,7 @@ shape_ch shapes[3] = {
 		.id = 2,
 		.name = "Superellipse",
 		.level = 0,
+		.range = 600,
 		.levels = {{
 			{1250,  150 },
 			{1450,  170 },
@@ -308,6 +307,7 @@ auto movement_float(bool gamepad) {
 	bool attack = false;
 	const float deadzone = 0.1f;
 	const float trigger_deadzone = -0.9f;
+	bool aim = false;
 	if (gamepad) {
 		if (abs(GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_X)) >= deadzone) {
 			joy_x = GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_X);
@@ -317,9 +317,11 @@ auto movement_float(bool gamepad) {
 		}
 		if (abs(GetGamepadAxisMovement(0, GAMEPAD_AXIS_RIGHT_X)) >= deadzone) {
 			aim_x = GetGamepadAxisMovement(0, GAMEPAD_AXIS_RIGHT_X);
+			aim = true;
 		}
 		if (abs(GetGamepadAxisMovement(0, GAMEPAD_AXIS_RIGHT_Y)) >= deadzone) {
 			aim_y = GetGamepadAxisMovement(0, GAMEPAD_AXIS_RIGHT_Y);
+			aim = true;
 		}
 		if (GetGamepadAxisMovement(0, GAMEPAD_AXIS_RIGHT_TRIGGER) > trigger_deadzone) {
 			attack = true;
@@ -327,15 +329,19 @@ auto movement_float(bool gamepad) {
 	}
 	if (IsKeyDown(KEY_UP)) {
 		aim_y = -1;
+		aim = true;
 	}
 	if (IsKeyDown(KEY_DOWN)) {
 		aim_y = 1;
+		aim = true;
 	}
 	if (IsKeyDown(KEY_LEFT)) {
 		aim_x = -1;
+		aim = true;
 	}
 	if (IsKeyDown(KEY_RIGHT)) {
 		aim_x = 1;
+		aim = true;
 	}
 	if (IsKeyDown(KEY_W)) {
 		joy_y = -1;
@@ -370,7 +376,55 @@ auto movement_float(bool gamepad) {
 	player_input input(joy_x, joy_y, attack);
 	input.aim_x = aim_x;
 	input.aim_y = aim_y;
-	return input;
+	struct return_obj {
+		player_input input;
+		bool aiming;
+		return_obj(player_input i, bool a) :
+			input(i),
+			aiming(a)
+		{
+		}
+	};
+	return_obj final_return(input, aim);
+	return final_return;
+}
+
+Vector2 aim_line(map& map, float& aim_x, float& aim_y, int& pl_x, int& pl_y, int& range, bool aiming) {
+	float lengthSq = aim_x * aim_x + aim_y * aim_y;
+	if (lengthSq > 1.0f) {
+		float length = std::sqrt(lengthSq);
+		aim_x /= length;
+		aim_y /= length;
+	}
+	if (aiming) {
+		int end_x = pl_x;
+		int end_y = pl_y;
+		float step_size = 10.0f;
+		int max_steps = static_cast<int>(range / step_size);
+		int counter = 0;
+		for (int i = 1; i <= max_steps; i++) {
+			counter++;
+			int next_x = pl_x + aim_x * i * step_size;
+			int next_y = pl_y + aim_y * i * step_size;
+			if (next_x >= 0 && next_x <= map.width * map.scale && next_y >= 0 && next_y <= map.height * map.scale) {
+				int tile = map.matrix[end_y / map.scale][end_x / map.scale];
+				if (tile == 3 || tile == 4) {
+					break;
+				}
+				else {
+					end_x = next_x;
+					end_y = next_y;
+				}
+			}
+			else {
+				break;
+			}
+		}
+		return Vector2{ (float)end_x,(float)end_y };
+	}
+	else {
+		return Vector2{ (float)pl_x,(float)pl_y };
+	}
 }
 class settings {
 	public:
@@ -479,11 +533,11 @@ class settings {
 		}
 };
 
-void SendInputToServer(ENetPeer* peer, player_input input) {
+void SendInputToServer(ENetPeer* peer, player_input& input) {
 	ENetPacket* packet = enet_packet_create(&input, sizeof(player_input), 0);
 	enet_peer_send(peer, 0, packet);
 }
-void DrawSuperellipse(int centerX, int centerY, float radiusX, float radiusY, float n, Color color, int segments = 1024) {
+void DrawSuperellipse(int centerX, int centerY, float radiusX, float radiusY, float n, Color color, int segments = 127) {
 	std::vector<Vector2> points(segments + 1);
 
 	for (int i = 0; i <= segments; i++) {
@@ -542,7 +596,7 @@ public:
 		}
 	}
 };
-void draw_tile(int screenX, int screenY, int size, int cellValue,int x, int y ) {
+void draw_tile(int screenX, int screenY, int size, int cellValue, int& x, int& y ) {
 	DrawRectangle(screenX, screenY, size, size, Color{ 15, 18, 26, 255 });
 
 
@@ -557,7 +611,7 @@ void draw_tile(int screenX, int screenY, int size, int cellValue,int x, int y ) 
 		break;
 	}
 	case 1: {
-		float scale_factor = size / 128.0f; 
+		float scale_factor = (float)size / 128.0f; 
 
 		DrawRectangle(screenX + 4 * scale_factor, screenY + 4 * scale_factor, size - 8 * scale_factor, size - 8 * scale_factor, Color{ 25, 30, 45, 255 });
 		Color water_col = Color{ 0, 121, 250, 200 };
@@ -636,14 +690,16 @@ void match_drawing(
 	std::vector<player>& players, 
 	map& map,
 	RenderTexture2D& canvas,
-	const int my_id, 
-	const int virtualWidth,
-	const int virtualHeight, 
+	const int& my_id,
+	const int& virtualWidth,
+	const int& virtualHeight,
 	const int& max_view_x, 
 	const int& max_view_y, 
 	const int& windowWidth,
 	const int& windowHeight,
-	float scale_r) {
+	float& scale_r,
+	Vector2& aim_line,
+	bool& aim) {
 
 	float scale = fminf((float)windowWidth / virtualWidth, (float)windowHeight / virtualHeight);
 
@@ -714,7 +770,7 @@ void match_drawing(
 				}
 			}
 		}
-
+		
 		for (int i = 0; i < world_1->active_player_count; i++) {
 			auto& p1 = world_1->players[i];
 			uint8_t p_id = static_cast<uint8_t>(p1.id);
@@ -729,6 +785,7 @@ void match_drawing(
 					draw_player_shape(players[p_id].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_colors[team_idx]);
 					DrawText(TextFormat("%d", players[p_id].health), players[p_id].pos_x * scale_r -MeasureText(TextFormat("%d", players[p_id].health), 64 * scale_r)/2, final_draw_y * scale_r - 80*scale_r-pl_width/2, 64 * scale_r, GREEN);
 					DrawText(TextFormat("%d", world_1->ammo), players[p_id].pos_x * scale_r - MeasureText(TextFormat("%d", world_1->ammo), 64 * scale_r) / 2, (final_draw_y - 144) * scale_r - pl_width / 2, 64 * scale_r, RED);
+
 				}
 				else {
 					int distance_x = abs(players[p_id].pos_x - players[my_id].pos_x);
@@ -758,6 +815,12 @@ void match_drawing(
 				DrawText(TextFormat("%d", players[p_id].health), players[p_id].pos_x * scale_r - MeasureText(TextFormat("%d", players[p_id].health), 64 * scale_r) / 2, final_draw_y * scale_r - 80 * scale_r - pl_width / 2, 64 * scale_r, GREEN);
 				if (p_id == my_id) {
 					DrawText(TextFormat("%d", world_1->ammo), players[p_id].pos_x * scale_r - MeasureText(TextFormat("%d", world_1->ammo), 64 * scale_r) / 2, final_draw_y * scale_r - 144 * scale_r - pl_width / 2, 64 * scale_r, RED);
+					if (aim) {
+						int aim_draw_x = aim_line.x - cam_offset_x;
+						int aim_draw_y = aim_line.y - cam_offset_y;
+						cout << "ceva" << std::endl;
+						DrawLineEx(Vector2{ final_draw_x * scale_r, final_draw_y * scale_r }, Vector2{ aim_draw_x * scale_r, aim_draw_y * scale_r },69.0f * scale_r, Color{ 120, 120, 120 ,169 });
+					}
 				}
 			}
 		}
@@ -873,7 +936,6 @@ public:
 		menu_op_temp.data = index;
 		map_menu.push_back(menu_op_temp);
 		if (map_menu.size() == 1) map_menu[0].selected = true;
-		
 	}
 	void add_option_sub(string name, int index, int main_index) {
 		menu_option menu_op_temp;
@@ -1019,42 +1081,72 @@ void draw_shape_menu(int shape_id, int window_height, int window_width,int x, in
 		break;
 	}
 	}
-
 }
-class shape_card {
+void draw_mini_map(int id, int x, int y, int width) {
+	map map;
+	auto file_name = maps.find(id);
+	map.load_file(file_name->second);
+	int tile_width = width/ map.width ;
+	int start_x = x - tile_width * map.width / 2;
+	int start_y = y- tile_width * map.width * 0.275;
+	for (int i = 0; i < map.height * 0.55; i++) {
+		for (int j = 0; j < map.width; j++) {
+			draw_tile(start_x, start_y, tile_width, map.matrix[i][j], start_x, start_y);
+			start_x += tile_width;
+		}
+		start_y += tile_width;
+		start_x = x - tile_width * map.width / 2 ;
+	}
+}
+class card {
 public:
-	int x, y, height, width, id;
-	Rectangle card;
-	shape_card(int shape_id, int width_ceva, int h, int pos_x, int pos_y) {
+	int x, y, height, width, id, type;
+	Rectangle card_rec;
+	card(int shape_id, int width_ceva, int h, int pos_x, int pos_y, int typey=0) {
 		x = pos_x;
 		y = pos_y;
 		height = h;
-		id = shape_id;
+		id = shape_id;  
 		width = width_ceva;
-		card = { (float)x,(float)y,(float)width,(float)height };
+		card_rec = { (float)x,(float)y,(float)width,(float)height };
+		type = typey;
 	}
 	void draw() {
-		DrawRectangleRounded(card, 0.2, 255, BLUE);
-		draw_shape_menu(id, 1.4*height, 1.4*width, x + width / 2, y + height / 2.3-8);
-		DrawText(shapes[id].name.c_str(), x + width / 2 - MeasureText(shapes[id].name.c_str(), 30 * scale_text)/2,y+height- 33 * scale_text, 30 * scale_text, RAYWHITE);
+		DrawRectangleRounded(card_rec, 0.2, 255, BLUE);
+		switch (type) {
+		case 0: {
+			draw_shape_menu(id, 1.4 * height, 1.4 * width, x + width / 2, y + height / 2.3 - 8);
+			DrawText(shapes[id].name.c_str(), x + width / 2 - MeasureText(shapes[id].name.c_str(), 30 * scale_text) / 2, y + height - 33 * scale_text, 30 * scale_text, RAYWHITE);
+			break;
+		}
+		case 1: {
+			draw_mini_map(id, x + width / 2, y + height / 2.3 - 8, 1.4 * height);
+			auto file_name = maps_id_name.find(id);
+			string name= file_name->second;
+			DrawText(name.c_str(), x + width / 2 - MeasureText(name.c_str(), 30 * scale_text) / 2, y + height - 33 * scale_text, 30 * scale_text, RAYWHITE);
+
+			break;
+		}
+		}
+		
 	}
 	bool is_pressed() {
-		return CheckCollisionPointRec(GetMousePosition(), card) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+		return CheckCollisionPointRec(GetMousePosition(), card_rec) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 	}
 	int get_id() {
 		return id;
 	}
 };
 
+
+
 enum class WaveType { SINE, SAWTOOTH, TRIANGLE, CHIRP };
 
 void draw_background(int window_width, int window_height) {
-	// Fill the screen with a clean, dark base canvas first
 	ClearBackground(Color{ 15, 15, 25, 255 });
 
 	float time = GetTime();
 
-	// Define the sequence of waves we want to render down the screen
 	WaveType wave_stack[] = {
 		WaveType::SINE,
 		WaveType::SAWTOOTH,
@@ -1117,7 +1209,7 @@ void draw_background(int window_width, int window_height) {
 			Color color = ColorFromHSV(hue, 0.85f, 0.9f);
 			color.a = 130;
 
-			DrawLineEx(points[i], points[i + 1], 4.0f, color);
+			DrawLineEx(points[i], points[i + 1], 3.0f*scale_text, color);
 		}
 	}
 }
@@ -1125,15 +1217,19 @@ void draw_shape_screen(int win_h, int win_w, int id) {
 	draw_background(win_w, win_h);
 	DrawText(shapes[id].name.c_str(), win_w / 3 - MeasureText(shapes[id].name.c_str(), 60 * scale_text) / 2+10, 10, 60 * scale_text, RAYWHITE);
 	draw_shape_menu(id, win_h, win_w, win_w / 3 + 10, win_h / 2);
+
 	Rectangle stats = { (float)win_w - win_w / 3.0f - 10, 10, (float)win_w / 3.0f,(float)win_h - 20 };
 	DrawRectangleRounded(stats, 0.1, 255, BLUE);
+
 	string ceva = "Level " + std::to_string(shapes[id].level+1);
 	float font_size = 45 * scale_text;
 	float text_width = MeasureText(ceva.c_str(), font_size);
 	DrawText(ceva.c_str(), win_w - win_w / 6 - text_width / 2-10, 20, font_size, RAYWHITE);
+
 	ceva = "Health: " + std::to_string(shapes[id].levels[shapes[id].level].health);
 	text_width = MeasureText(ceva.c_str(), font_size);
 	DrawText(ceva.c_str(), win_w - win_w / 6 - text_width / 2-10, 40+ font_size, font_size, RAYWHITE);
+
 	ceva = "Damage: " + std::to_string(shapes[id].levels[shapes[id].level].ammo_damage);
 	text_width = MeasureText(ceva.c_str(), font_size);
 	DrawText(ceva.c_str(), win_w - win_w / 6 - text_width / 2-10, 60 + 2* font_size, font_size, RAYWHITE);
@@ -1189,6 +1285,9 @@ void draw_quanta(int x, int y, int w) {
 		DrawLineEx(points[i], points[i+1],(float) w / 40, wave2_color);
 	}
 }
+
+
+
 int main() {
 	bool active = true;
 	int my_id=-1;
@@ -1286,7 +1385,7 @@ int main() {
 	int baseSize = 256;
 	int padding = 0;
 	int fileDataSize = 0;
-	unsigned char* fileData = LoadFileData("IR-Regular.ttf", &fileDataSize);
+	unsigned char* fileData = LoadFileData("font/IR-Regular.ttf", &fileDataSize);
 	Font i_font = { 0 };
 	i_font.baseSize = baseSize;
 	i_font.glyphCount = glyphCount;
@@ -1308,10 +1407,6 @@ int main() {
 	int coins_got = 0;
 	int imaginaries_got = 0;
 	int shape_screen_id = 0;
-	menu_std map_menu;
-	for (auto it : maps_o) {
-		map_menu.add_option_main(it.first, it.second);
-	}
 	menu_std settings_menu;
 	for (int i = 0; i < 4; i++) {
 		settings_menu.add_option_main(settings_array[i], i);
@@ -1356,7 +1451,7 @@ int main() {
 				if (packet_type == static_cast<uint8_t>(PacketType::ID_ASSIGNMENT)) {
 					 
 					my_id = event.packet->data[1];
-					cout << "Server assigned me Player ID: " << my_id << std::flush;
+					cout << "Server assigned me Player ID: " << my_id << std::endl;
 				}
 				else if (packet_type == static_cast<uint8_t>(PacketType::WORLD_STATE)) {
 					if (event.packet->dataLength < 3) {
@@ -1481,7 +1576,7 @@ int main() {
 					break;
 				}
 				case 3:{
-					button.bounds = { (float)windowWidth-10- windowWidth / 5.69f/2,(float)10, (float)windowWidth / 5.69f/2,(float)windowHeight / 12/2 };
+					button.bounds = { (float)windowWidth-10- windowWidth / 5.69f/2,(float)10, (float)100 * scale_text,(float)25 * scale_text };
 					button.fontSize = 20 * scale_text;
 					button.hoverColor = Color{ 215,215,0,255 };
 					button.corner_r = 0.4;
@@ -1644,47 +1739,6 @@ int main() {
 			break;
 		}
 		case GameState::state_map_select: {
-			Vector2 mousePos = GetMousePosition();
-			map_menu.Update();
-			if (map_menu.IsConfirmed()) {
-				map_select id;
-				id.map_id = map_menu.get_data();
-				std::cout << "deliver map id " << id.map_id << std::endl;
-				ENetPacket* packet = enet_packet_create(&id, sizeof(map_select), ENET_PACKET_FLAG_RELIABLE);
-				map_menu.Reset();
-				enet_peer_send(peer, 0, packet);
-				current_state = GameState::STATE_MENU;
-				auto file_name = maps.find(id.map_id);
-				if (file_name != maps.end()) {
-					if (!current_map.load_file(file_name->second)) {
-						cout << "No map found in file" << std::endl;
-						std::cin.get();
-					}
-					else {
-						cout << "map loaded succesfully, width " << current_map.width << " height " << current_map.height << std::endl;
-						max_view_x = current_map.width * current_map.scale / 2;
-						max_view_y = current_map.width * current_map.scale / 2 / 16 * 9;
-						virtualWidth = 2 * max_view_x * current_scale;
-						virtualHeight = 2 * max_view_y * current_scale;
-						players.clear();
-						for (auto& item : world_buffer) {
-							item = std::nullopt; 
-						}
-						for (int i = 0; i < current_map.pl_nr; i++) {
-							player pl_temp(1000, "Player" + std::to_string(i), current_map.pl_pos[i][1], current_map.pl_pos[i][0], i);
-							pl_temp.active = true;
-							players.push_back(pl_temp);
-						}
-						settings.last_map_id = id.map_id;
-						current_map.id = id.map_id;
-						settings.save();
-						UnloadRenderTexture(canvas);
-						canvas = LoadRenderTexture(virtualWidth, virtualHeight);
-						SetTextureFilter(canvas.texture, TEXTURE_FILTER_BILINEAR);
-					}
-				}
-				
-			}	
 			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30 * scale_text);
 
 			if (back.IsPressed(GetMousePosition())) {
@@ -1693,9 +1747,73 @@ int main() {
 			BeginDrawing();
 			draw_background(windowWidth, windowHeight);
 			back.Draw(GetMousePosition(), false);
+			int row_nr = 0;
+			for (int i = 0; i < std::size(maps); i++) {
+				int order = i % 3;
+				int pos_x = 0;
+				int pos_y = 40 + (windowHeight / 4 + 10) * row_nr;
+				switch (order) {
+				case 0: {
+					pos_x = windowWidth / 2 - windowWidth / 8 - 10 - windowWidth / 4;
+					break;
+				}
+				case 1: {
+					pos_x = windowWidth / 2 - windowWidth / 8;
+					break;
+				}
+				case 2: {
+					pos_x = windowWidth / 2 + windowWidth / 8 + 10;
+					row_nr++;
+					break;
+				}
+				default: {
+					break;
+				}
+				}
+				card card(i, windowWidth / 4, windowHeight / 4, pos_x, pos_y,1);
+				card.draw();
+				if (card.is_pressed()) {
+					map_select id;
+					id.map_id = card.get_id();
+					current_state = GameState::STATE_MENU;
+					if (id.map_id != settings.last_map_id) {
+						std::cout << "deliver map id " << id.map_id << std::endl;
+						ENetPacket* packet = enet_packet_create(&id, sizeof(map_select), ENET_PACKET_FLAG_RELIABLE);
+						enet_peer_send(peer, 0, packet);
+						auto file_name = maps.find(id.map_id);
+						if (file_name != maps.end()) {
+							if (!current_map.load_file(file_name->second)) {
+								cout << "No map found in file" << std::endl;
+								std::cin.get();
+							}
+							else {
+								cout << "map loaded succesfully, width " << current_map.width << " height " << current_map.height << std::endl;
+								max_view_x = current_map.width * current_map.scale / 2;
+								max_view_y = current_map.width * current_map.scale / 2 / 16 * 9;
+								virtualWidth = 2 * max_view_x * current_scale;
+								virtualHeight = 2 * max_view_y * current_scale;
+								players.clear();
+								for (auto& item : world_buffer) {
+									item = std::nullopt;
+								}
+								for (int i = 0; i < current_map.pl_nr; i++) {
+									player pl_temp(1000, "Player" + std::to_string(i), current_map.pl_pos[i][1], current_map.pl_pos[i][0], i);
+									pl_temp.active = true;
+									players.push_back(pl_temp);
+								}
+								settings.last_map_id = id.map_id;
+								current_map.id = id.map_id;
+								settings.save();
+								UnloadRenderTexture(canvas);
+								canvas = LoadRenderTexture(virtualWidth, virtualHeight);
+								SetTextureFilter(canvas.texture, TEXTURE_FILTER_BILINEAR);
+							}
 
+						}
+					}
+				}
+			}
 
-			map_menu.Draw(windowWidth, windowHeight, "map");
 			EndDrawing();
 			if (IsKeyPressed(KEY_Z)) {
 				current_state = GameState::STATE_MENU;
@@ -1736,7 +1854,7 @@ int main() {
 					break;
 				}
 				}
-				shape_card card(i, windowWidth / 4, windowHeight / 4, pos_x, pos_y);
+				card card(i, windowWidth / 4, windowHeight / 4, pos_x, pos_y);
 				card.draw();
 				if (card.is_pressed()) {
 					current_state = GameState::state_shape_screen;
@@ -1945,7 +2063,15 @@ int main() {
 		case GameState::STATE_lobby: {
 			BeginDrawing();
 			draw_background(windowWidth, windowHeight);
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30 * scale_text);
+			back.Draw(GetMousePosition(), false);
+			if (IsKeyPressed(KEY_Z)|| back.IsPressed(GetMousePosition())) {
+				current_state = GameState::STATE_MENU;
 
+				disconnect ceva;
+				ENetPacket* packet = enet_packet_create(&ceva, sizeof(disconnect), ENET_PACKET_FLAG_RELIABLE);
+				enet_peer_send(peer, 0, packet);
+			}
 			if (IsKeyDown(KEY_B)) {
 				force_connect ceva;
 				ENetPacket* packet = enet_packet_create(&ceva, sizeof(force_connect), ENET_PACKET_FLAG_RELIABLE);
@@ -1953,22 +2079,24 @@ int main() {
 			}
 			DrawText("Waiting for players", windowWidth / 2 - MeasureText("Waiting for players", 30 * scale_text)/2, windowHeight / 3, 30 * scale_text, YELLOW);
 			DrawText(TextFormat("%d / %d", players_waiting, current_map.pl_nr), windowWidth / 2 - MeasureText(TextFormat("%d / %d", players_waiting, current_map.pl_nr), 20 * scale_text)/2, windowHeight / 2, 20 * scale_text, RAYWHITE);
+			DrawText("Press B to connect anyway", windowWidth / 2 - MeasureText("Press B to connect anyway", 20 * scale_text) / 2, 2*windowHeight / 3, 20 * scale_text, RAYWHITE);
 			EndDrawing();
 			break;
 		}
 		case GameState::STATE_PLAYING:{
-			player_input input = movement_float(IsGamepadAvailable(0));
+			auto input = movement_float(IsGamepadAvailable(0));
 			if (my_id != -1) {
-				SendInputToServer(peer, input);
+				SendInputToServer(peer, input.input);
 			}
-				match_drawing(world_buffer, time_buffer, players, current_map, canvas, my_id, virtualWidth, virtualHeight, max_view_x, max_view_y,windowWidth,windowHeight,current_scale);
-				if (IsKeyPressed(KEY_Z)) {
-					current_state = GameState::STATE_MENU;
+			Vector2 aim_vect = aim_line(current_map, input.input.aim_x, input.input.aim_y, players[my_id].pos_x, players[my_id].pos_y, shapes[my_shape_id].range, input.aiming);
+			match_drawing(world_buffer, time_buffer, players, current_map, canvas, my_id, virtualWidth, virtualHeight, max_view_x, max_view_y,windowWidth,windowHeight,current_scale, aim_vect, input.aiming);
+			if (IsKeyPressed(KEY_Z)) {
+				current_state = GameState::STATE_MENU;
 
-					disconnect ceva;
-					ENetPacket* packet = enet_packet_create(&ceva, sizeof(disconnect), ENET_PACKET_FLAG_RELIABLE);
-					enet_peer_send(peer, 0, packet);
-				}
+				disconnect ceva;
+				ENetPacket* packet = enet_packet_create(&ceva, sizeof(disconnect), ENET_PACKET_FLAG_RELIABLE);
+				enet_peer_send(peer, 0, packet);
+			}
 			break;
 		}
 		case GameState::STATE_GAME_OVER: {
@@ -1981,12 +2109,84 @@ int main() {
 				players.push_back(pl_temp);
 			}
 			projectiles.clear();
+			button back(10, 10, windowWidth / 10, windowHeight / 12, "Back", 30 * scale_text);
+			button play_again((float)windowWidth - 10 - windowWidth / 3.00f, (float)windowHeight - 10 - windowHeight / 8, (float)windowWidth / 3.00f, (float)windowHeight / 8 , "Play again", 60 * scale_text);
+
+			play_again.hoverColor = Color{ 215,215,0,255 };
+			play_again.corner_r = 0.4;
+
+			if (back.IsPressed(GetMousePosition())) {
+				current_state = GameState::STATE_MENU;
+			}
+			if (play_again.IsPressed(GetMousePosition())) {
+				current_state = GameState::STATE_lobby;
+				pressed_play play;
+				play.shape_id = my_shape_id;
+				play.shape_level = 2;
+				ENetPacket* packet = enet_packet_create(&play, sizeof(pressed_play), ENET_PACKET_FLAG_RELIABLE);
+				enet_peer_send(peer, 0, packet);
+			}
+
 			BeginDrawing();
 			draw_background(windowWidth, windowHeight);
-			DrawText("GAME OVER!", windowWidth / 2 - 160, windowHeight / 3, 30 * scale_text, WHITE);
-			DrawText(TextFormat("Your rank: %d", my_result), windowWidth / 2 - 160, windowHeight / 2.5, 30 * scale_text, WHITE);
-			DrawText(TextFormat("Got: %d quanta and %d reals", trophies_got, coins_got), windowWidth / 2 - 160, windowHeight / 2.25, 30 * scale_text, WHITE);
-			DrawText("PRESS [ENTER] TO RETURN TO MENU", windowWidth / 2 - 160, windowHeight / 2, 18 * scale_text, GRAY);
+
+			
+			draw_shape_menu(settings.last_shape_id, windowHeight, windowWidth, windowWidth / 3 + 10, windowHeight / 2);
+
+			Rectangle stats = { (float)windowWidth - windowWidth / 3.0f - 10, 10, (float)windowWidth / 3.0f,(float)windowHeight - 30 - windowHeight / 8 };
+			DrawRectangleRounded(stats, 0.1, 255, BLUE);
+
+			string ceva = "Victory!";
+			if ((my_result > 6 && current_map.team_mode==0)|| (my_result > 1 && current_map.team_mode == 1)) {
+				ceva = "Lost!";
+			}
+			float font_size = 45 * scale_text;
+			float text_width = MeasureText(ceva.c_str(), font_size);
+			DrawText(ceva.c_str(), windowWidth / 3 - MeasureText(ceva.c_str(), 60 * scale_text) / 2 + 10, 10, 60 * scale_text, RAYWHITE);
+
+			//DrawText("GAME OVER!", windowWidth / 2 - 160, windowHeight / 3, 30 * scale_text, WHITE);
+			//DrawText(TextFormat("Your rank: %d", my_result), windowWidth / 2 - 160, windowHeight / 2.5, 30 * scale_text, WHITE);
+			//DrawText(TextFormat("Got: %d quanta and %d reals", trophies_got, coins_got), windowWidth / 2 - 160, windowHeight / 2.25, 30 * scale_text, WHITE);
+			//DrawText("PRESS [ENTER] TO RETURN TO MENU", windowWidth / 2 - 160, windowHeight / 2, 18 * scale_text, GRAY);
+
+			if (current_map.team_mode == 1) {
+				ceva = "You got:\n";
+				text_width = MeasureText(ceva.c_str(), font_size);
+				DrawText(ceva.c_str(), windowWidth - windowWidth / 6 - text_width / 2 - 10, 20, font_size, RAYWHITE);
+
+				ceva = "Reals: " + std::to_string(coins_got);
+				text_width = MeasureText(ceva.c_str(), font_size);
+				DrawText(ceva.c_str(), windowWidth - windowWidth / 6 - text_width / 2 - 10, 40 + font_size, font_size, RAYWHITE);
+				draw_reals(windowWidth - windowWidth / 6 + text_width / 2 + 0.5 * font_size, 40 + 1.45 * font_size, font_size, i_font);
+
+				ceva = "Quanta: " + std::to_string(trophies_got);
+				text_width = MeasureText(ceva.c_str(), font_size);
+				DrawText(ceva.c_str(), windowWidth - windowWidth / 6 - text_width / 2 - 10, 60 + 2 * font_size, font_size, RAYWHITE);
+				draw_quanta(windowWidth - windowWidth / 6 + text_width / 2 + 0.5 * font_size, 60 + 2.45 * font_size, font_size);
+			}
+			else {
+				ceva = TextFormat("Your rank: %d", my_result);
+				text_width = MeasureText(ceva.c_str(), font_size);
+				DrawText(ceva.c_str(), windowWidth - windowWidth / 6 - text_width / 2 - 10, 20, font_size, RAYWHITE);
+
+				ceva = "You got:";
+				text_width = MeasureText(ceva.c_str(), font_size);
+				DrawText(ceva.c_str(), windowWidth - windowWidth / 6 - text_width / 2 - 10, 40 + font_size, font_size, RAYWHITE);
+
+				ceva = "Reals: " + std::to_string(coins_got);
+				text_width = MeasureText(ceva.c_str(), font_size);
+				DrawText(ceva.c_str(), windowWidth - windowWidth / 6 - text_width / 2 - 10, 60 +2* font_size, font_size, RAYWHITE);
+				draw_reals(windowWidth - windowWidth / 6 + text_width / 2 + 0.5 * font_size, 40 + 1.45 * font_size, font_size, i_font);
+
+				ceva = "Quanta: " + std::to_string(trophies_got);
+				text_width = MeasureText(ceva.c_str(), font_size);
+				DrawText(ceva.c_str(), windowWidth - windowWidth / 6 - text_width / 2 - 10, 80 + 3 * font_size, font_size, RAYWHITE);
+				draw_quanta(windowWidth - windowWidth / 6 + text_width / 2 + 0.5 * font_size, 60 + 2.45 * font_size, font_size);
+			}
+			play_again.Draw(GetMousePosition(),false);
+			back.Draw(GetMousePosition(), false);
+			
+			
 			EndDrawing();
 			if (IsKeyPressed(KEY_ENTER)) {
 				current_state = GameState::STATE_MENU;
@@ -1995,6 +2195,7 @@ int main() {
 		}
 		}
 	}
+	enet_peer_disconnect(peer, 0);
 	UnloadRenderTexture(canvas);
 	CloseWindow();
 	return 0;
