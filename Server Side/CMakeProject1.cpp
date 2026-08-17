@@ -266,8 +266,7 @@ bool aim(map& map, player(&players)[MAX_PLAYERS], projectile& pr, float d_time) 
 		pr.aim_x /= length; // Scale X down (becomes ~0.707) if needed, cause it is a little redundant
 		pr.aim_y /= length; // Scale Y down (becomes ~0.707) if needed, cause it is a little redundant
 	}
-
-	else if (lengthSq < 1.0f) {
+	else if (lengthSq < 1.0f&& lengthSq>0.0f) {
 		float length = std::sqrt(lengthSq);
 		pr.aim_x *= 1.0f / length;
 		pr.aim_y *= 1.0f / length;
