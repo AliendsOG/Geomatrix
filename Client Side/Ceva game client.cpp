@@ -372,7 +372,7 @@ auto movement_float(bool gamepad) {
 		aim_x /= length;
 		aim_y /= length;
 	}
-	else if (lengthSq < 1.0f) {
+	else if (lengthSq < 1.0f && lengthSq>0.0f) {
 		float length = std::sqrt(lengthSq);
 		aim_x *= 1.0f/length;
 		aim_y *= 1.0f /length;
