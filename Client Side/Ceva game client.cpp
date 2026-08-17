@@ -372,6 +372,11 @@ auto movement_float(bool gamepad) {
 		aim_x /= length;
 		aim_y /= length;
 	}
+	else if (lengthSq < 1.0f) {
+		float length = std::sqrt(lengthSq);
+		aim_x *= 1.0f/length;
+		aim_y *= 1.0f /length;
+	}
 
 	player_input input(joy_x, joy_y, attack);
 	input.aim_x = aim_x;
@@ -778,21 +783,33 @@ void match_drawing(
 			int final_draw_x = players[p_id].pos_x - cam_offset_x ;
 			int final_draw_y = players[p_id].pos_y - cam_offset_y ;
 			int team_idx = p_id;
+			if (map.team_mode == 1) {
+				if (p_id < map.pl_nr / 2) team_idx = 0;
+				else team_idx = 1;
+			}
+			Color pl_color = pl_colors[team_idx];
+			if (map.team_mode == 1) {
+				pl_color= pl_colors_team[team_idx];
+			}
 			int tile = map.matrix[players[p_id].pos_y / map.scale][players[p_id].pos_x / map.scale];
 			if (tile == 2) {
 				if (p_id == my_id) {
-					pl_colors[team_idx].a = 169;
-					draw_player_shape(players[p_id].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_colors[team_idx]);
+					pl_color.a = 169;
+					draw_player_shape(players[p_id].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_color);
 					DrawText(TextFormat("%d", players[p_id].health), players[p_id].pos_x * scale_r -MeasureText(TextFormat("%d", players[p_id].health), 64 * scale_r)/2, final_draw_y * scale_r - 80*scale_r-pl_width/2, 64 * scale_r, GREEN);
 					DrawText(TextFormat("%d", world_1->ammo), players[p_id].pos_x * scale_r - MeasureText(TextFormat("%d", world_1->ammo), 64 * scale_r) / 2, (final_draw_y - 144) * scale_r - pl_width / 2, 64 * scale_r, RED);
-
+					if (aim) {
+						int aim_draw_x = aim_line.x - cam_offset_x;
+						int aim_draw_y = aim_line.y - cam_offset_y;
+						DrawLineEx(Vector2{ final_draw_x * scale_r, final_draw_y * scale_r }, Vector2{ aim_draw_x * scale_r, aim_draw_y * scale_r }, 69.0f * scale_r, Color{ 255, 255, 255,169 });
+					}
 				}
 				else {
 					int distance_x = abs(players[p_id].pos_x - players[my_id].pos_x);
 					int distance_y = abs(players[p_id].pos_y - players[my_id].pos_y);
 					if ((distance_x <= map.scale * 3)&& (distance_y <= map.scale * 3)) {
 						pl_colors[team_idx].a = 169;
-						draw_player_shape(players[p_id].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_colors[team_idx]);
+						draw_player_shape(players[p_id].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_color);
 						DrawText(TextFormat("%d", players[p_id].health), players[p_id].pos_x * scale_r - MeasureText(TextFormat("%d", players[p_id].health), 64 * scale_r) / 2, final_draw_y * scale_r - 80 * scale_r - pl_width / 2, 64 * scale_r, GREEN);
 					}
 					if (world_1->players[p_id].health!= world_2->players[p_id].health) {
@@ -801,7 +818,7 @@ void match_drawing(
 					if (players[p_id].visible_delay>0.0) {
 						players[p_id].visible_delay -= 2.0 / 69.0;
 						pl_colors_team[team_idx].a = 169;
-						draw_player_shape(players[i].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_colors[team_idx]);
+						draw_player_shape(players[i].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_color);
 						DrawText(TextFormat("%d", players[p_id].health), players[p_id].pos_x * scale_r - MeasureText(TextFormat("%d", players[p_id].health), 64 * scale_r) / 2, final_draw_y * scale_r - 80 * scale_r - pl_width / 2, 64 * scale_r, GREEN);
 					}
 					else {
@@ -811,15 +828,14 @@ void match_drawing(
 			}
 			else {
 				pl_colors[team_idx].a = 255;
-				draw_player_shape(players[p_id].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_colors[team_idx]);
+				draw_player_shape(players[p_id].shape.id, final_draw_x * scale_r, final_draw_y * scale_r, pl_color);
 				DrawText(TextFormat("%d", players[p_id].health), players[p_id].pos_x * scale_r - MeasureText(TextFormat("%d", players[p_id].health), 64 * scale_r) / 2, final_draw_y * scale_r - 80 * scale_r - pl_width / 2, 64 * scale_r, GREEN);
 				if (p_id == my_id) {
 					DrawText(TextFormat("%d", world_1->ammo), players[p_id].pos_x * scale_r - MeasureText(TextFormat("%d", world_1->ammo), 64 * scale_r) / 2, final_draw_y * scale_r - 144 * scale_r - pl_width / 2, 64 * scale_r, RED);
 					if (aim) {
 						int aim_draw_x = aim_line.x - cam_offset_x;
 						int aim_draw_y = aim_line.y - cam_offset_y;
-						cout << "ceva" << std::endl;
-						DrawLineEx(Vector2{ final_draw_x * scale_r, final_draw_y * scale_r }, Vector2{ aim_draw_x * scale_r, aim_draw_y * scale_r },69.0f * scale_r, Color{ 120, 120, 120 ,169 });
+						DrawLineEx(Vector2{ final_draw_x * scale_r, final_draw_y * scale_r }, Vector2{ aim_draw_x * scale_r, aim_draw_y * scale_r },69.0f * scale_r, Color{ 255, 255, 255,169 });
 					}
 				}
 			}
