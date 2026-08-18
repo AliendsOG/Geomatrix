@@ -54,12 +54,6 @@ This project wouldn't be possible without these incredible open-source libraries
 * Loads the saved settings or data stored in the local file;
 * Sends the inputs of the player to the server for processing;
 
-# AI Use
-I used Gemini during the development of this project for:
-* **Brainstorming:** Discussing different architecture designs and client-server communication options.
-* **Learning:** Asking AI about what specific Raylib or ENet functions are used for so I could more easily find what I was looking for.
-* **Debugging:** Finding logic or syntax errors in the code.
-*All core game loops, game mechanics, physics simulation, ENet network event handling, game state serialization, and Raylib rendering implementations were manually written and debugged by me.*
 
 
 
