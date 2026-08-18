@@ -10,6 +10,7 @@
 #undef ShowCursor
 #undef PlaySound
 #include "raylib.h"
+#include "raymath.h"
 using std::cout;
 using std::string;
 //network stuff begin
@@ -102,15 +103,21 @@ enum class GameState {
 };
 const std::unordered_map<int, string>maps = {
 	{0, "maps/default_map.txt"},
-	{1, "maps/ceva.txt"}
+	{1, "maps/ceva.txt"},
+	{2, "maps/something.txt"},
+	{3, "maps/irrational.txt"}
 };
 const std::map<string, int>maps_o = {
-	{"Default",0},
-	{"Ceva",1}
+	{"Natural arena",0},
+	{"Integers arena",1},
+	{"Rational arena",2},
+	{ "Irrational arena",3 }
 };
 const std::unordered_map<int, string>maps_id_name = {
-	{0,"Default"},
-	{1,"Ceva"}
+	{0,"Natural arena"},
+	{1,"Integers arena"},
+	{2,"Rational arena"},
+	{3, "Irrational arena"}
 };
 struct map {
 	int height{};
@@ -165,7 +172,7 @@ struct shape_ch {
 	std::array<level_stats, 3> levels;
 };
 const int level_up_prices[2] = {256, 512 };
-shape_ch shapes[3] = {
+shape_ch shapes[5] = {
 	{
 		.id = 0,
 		.name = "Square",
@@ -198,14 +205,36 @@ shape_ch shapes[3] = {
 			{1450,  170 },
 			{1800,  200 },
 		}}
+	},
+	{
+		.id = 3,
+		.name = "Astroid",
+		.range = 1000,
+		.levels = {{
+			{800, 165 },
+			{950, 180 },
+			{1150, 205 },
+		}}
+	},
+	{
+		.id = 4,
+		.name = "Reuleaux Triangle",
+		.range = 500,
+		.levels = {{
+			{1550, 120 },
+			{1750, 150 },
+			{2100, 175 },
+		}}
 	}
 };
-const int shapes_price_reals_array[std::size(shapes)] = {0, 256, 512};
+const int shapes_price_reals_array[std::size(shapes)] = {0, 256, 512, 1024, 2048};
 const int shapes_price_imaginaries_array[std::size(shapes)] = { 0, 4, 8};
 const std::unordered_map<string, int>shapes_map = {
 	{"Square",0},
 	{"Circle",1},
-	{"Superellipse",2}
+	{"Superellipse",2},
+	{"Astroid",3},
+	{"Reuleaux Triangle",4}
 };
 std::vector<shape_ch>shapes_unlocked={
 	{
@@ -498,7 +527,7 @@ class settings {
 						else {
 							shape_ch shape;
 							shape.id = std::stoi(key);
-							shape.level = std::stoi(key);
+							shape.level = std::stoi(value);
 							shape.name = shapes[shape.id].name;
 							shape.levels = shapes[shape.id].levels;
 							shapes_unlocked.push_back(shape);
@@ -568,6 +597,62 @@ void DrawSuperellipse(int centerX, int centerY, float radiusX, float radiusY, fl
 		DrawTriangle(center, points[i + 1], points[i], color);
 	}
 }
+void DrawAstroid(Vector2 center, float radius, Color color) {
+	const int segments = 40;
+	Vector2 prev_point = { center.x + radius, center.y };
+
+	for (int i = 1; i <= segments; i++) {
+		float theta = (2.0f * PI * i) / segments;
+		float cos_t = cosf(theta);
+		float sin_t = sinf(theta);
+
+		Vector2 current_point = {
+			center.x + radius * (cos_t * cos_t * cos_t),
+			center.y + radius * (sin_t * sin_t * sin_t)
+		};
+
+		DrawTriangle(center, current_point, prev_point, color);
+
+		prev_point = current_point;
+	}
+}
+void DrawReuleauxTriangle(Vector2 center, float size, Color color) {
+	Vector2 v[3];
+	for (int i = 0; i < 3; i++) {
+		float angle = (i * 120.0f - 90.0f) * DEG2RAD; // -90 deg points straight up
+		v[i] = { center.x + size * cosf(angle), center.y + size * sinf(angle) };
+	}
+
+	float side_length = Vector2Distance(v[0], v[1]);
+	const int segments_per_arc = 15;
+
+	Vector2 prev_point = v[1];
+	for (int i = 0; i < 3; i++) {
+		Vector2 arc_center = v[i];
+		Vector2 start_vertex = v[(i + 1) % 3];
+		Vector2 end_vertex = v[(i + 2) % 3];
+
+		float start_angle = atan2f(start_vertex.y - arc_center.y, start_vertex.x - arc_center.x);
+		float end_angle = atan2f(end_vertex.y - arc_center.y, end_vertex.x - arc_center.x);
+
+		if (end_angle < start_angle) end_angle += 2.0f * PI;
+
+		for (int j = 1; j <= segments_per_arc; j++) {
+			float t = (float)j / segments_per_arc;
+			float current_angle = start_angle + t * (end_angle - start_angle);
+
+			Vector2 current_point = {
+				arc_center.x + side_length * cosf(current_angle),
+				arc_center.y + side_length * sinf(current_angle)
+			};
+
+			DrawTriangle(center, current_point, prev_point, color);
+
+			prev_point = current_point;
+		}
+	}
+}
+
 class water_tile {
 private:
 	float amplitude;
@@ -682,6 +767,14 @@ void draw_player_shape(int shape_id, int center_x, int center_y, Color col) {
 	}
 	case 2: {
 		DrawSuperellipse(center_x, center_y, pl_width / 2, pl_width / 2, 4.0f, col);
+		break;
+	}
+	case 3: {
+		DrawAstroid(Vector2{(float) center_x, (float) center_y }, pl_width / 2, col);
+		break;
+	}
+	case 4: {
+		DrawReuleauxTriangle(Vector2{ (float)center_x, (float)center_y }, pl_width / 2, col);
 		break;
 	}
 	default:
@@ -1094,6 +1187,17 @@ void draw_shape_menu(int shape_id, int window_height, int window_width,int x, in
 	}
 	case 2: {
 		DrawSuperellipse(x, y, window_height / 4, window_height / 4, 4, RED);
+		break;
+	}
+	case 3: {
+		DrawAstroid(Vector2{ (float)x, (float)y }, window_height / 4, RED);
+		break;
+	}
+	case 4: {
+		DrawReuleauxTriangle(Vector2{ (float)x, (float)y }, window_height / 4, RED);
+		break;
+	}
+	default: {
 		break;
 	}
 	}
@@ -1677,7 +1781,6 @@ int main() {
 			DrawText(TextFormat("%d", settings.quanta), rec_x + rec_w / 2 -  text_width/ 2, rec_y+ (rec_h - font_size) / 2 + visual_y_offset, font_size, RAYWHITE);
 			draw_quanta(rec_x + rec_w, rec_y + rec_h / 2, rec_h + 5 * scale_text);
 
-
 			Rectangle bounds = {windowWidth-300,windowHeight-150,200,100};
 			draw_shape_menu(settings.last_shape_id, windowHeight, windowWidth, windowWidth/2,windowHeight/2);
 			if (settings.tutorial) {
@@ -1713,9 +1816,10 @@ int main() {
 				ceva = "press B to enter a match without connecting the total number of players";
 				DrawText(ceva.c_str(), windowWidth / 2 - MeasureText(ceva.c_str(), 20 * scale_text) / 2, windowHeight / 2 + 110, 20 * scale_text, RAYWHITE);
 			}
-			DrawFPS(10, 10);
 
+			DrawFPS(10, 10);
 			EndDrawing();
+
 			if (IsKeyPressed(KEY_ENTER)) {
 				for (int i = 0; i < 4; i++) {
 					if (menu[i].selected) {
@@ -1897,9 +2001,9 @@ int main() {
 				}
 			}
 
-			button select(windowWidth - windowWidth / 3, windowHeight - windowHeight / 6-20, windowWidth / 3-20, windowHeight / 6,TextFormat("%d reals",shapes_price_reals_array[shape_screen_id]), 50 * scale_text);
+			button select(windowWidth - windowWidth / 3, windowHeight - windowHeight / 6-20, windowWidth / 3-20, windowHeight / 6,TextFormat("%d",shapes_price_reals_array[shape_screen_id]), 50 * scale_text);
 			select.corner_r = 0.269;
-			button upgrade(windowWidth - windowWidth / 3, windowHeight - 2*windowHeight / 6 - 30, windowWidth / 3 - 20, windowHeight / 6, TextFormat("%d reals", level_up_prices[shapes[shape_screen_id].level]), 50 * scale_text);
+			button upgrade(windowWidth - windowWidth / 3, windowHeight - 2*windowHeight / 6 - 30, windowWidth / 3 - 20, windowHeight / 6, TextFormat("%d", level_up_prices[shapes[shape_screen_id].level]), 50 * scale_text);
 			upgrade.corner_r = 0.269;
 			int img_price=0;
 			bool img_pop_up=false;
@@ -1965,6 +2069,10 @@ int main() {
 			back.Draw(GetMousePosition(), false);
 			if (unlocked&&(shapes[shape_screen_id].level<2)) {
 				upgrade.Draw(GetMousePosition(), false);
+				draw_reals(windowWidth - windowWidth / 6 + 25 * scale_text + MeasureText(TextFormat("%d", level_up_prices[shapes[shape_screen_id].level]), 50 * scale_text) / 2 , windowHeight - windowHeight / 4 - 30, 50 * scale_text, i_font);
+			}
+			else if(!unlocked) {
+				draw_reals(windowWidth - windowWidth / 6 + 25 * scale_text + MeasureText(TextFormat("%d", shapes_price_reals_array[shape_screen_id]), 50 * scale_text)/2 , windowHeight - windowHeight / 12-20, 50 * scale_text, i_font);
 			}
 			EndDrawing();
 			if (IsKeyPressed(KEY_Z)) {
