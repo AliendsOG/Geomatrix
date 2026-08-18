@@ -74,10 +74,13 @@ enum class ServerState {
 	MATCH_IN_PROGRESS,  
 	GAME_OVER            
 };
-std::unordered_map<int, string>maps = {
+const std::unordered_map<int, string>maps = {
 	{0, "maps/default_map.txt"},
-	{1, "maps/ceva.txt"}
+	{1, "maps/ceva.txt"},
+	{2, "maps/something.txt"},	
+	{3, "maps/irrational.txt"}
 };
+
 int trophy_payout[10] = {26,18,13,9,6,2 ,-2,-6,-9,-11};
 int coin_payout[10] = { 100,79,69,50,38,26,21,16,10,6};
 int trophy_payout_team[2] = { 22, -8 };
@@ -139,7 +142,7 @@ struct shape_ch {
 	float reload_time{};
 	level_stats levels[3];
 };
-shape_ch shapes[3] = {
+shape_ch shapes[5] = {
 	{
 		.id = 0,
 		.name= "Square",
@@ -161,7 +164,7 @@ shape_ch shapes[3] = {
 		.speed = 364,
 		.range = 300,
 		.ammo = 6,
-		.ammo_r = 56,
+		.ammo_r = 36,
 		.ammo_speed = 1500,
 		.reload_time = 0.4f,
 		.levels = {
@@ -183,6 +186,36 @@ shape_ch shapes[3] = {
 			{.health = 1250, .ammo_damage = 150 },
 			{.health = 1450, .ammo_damage = 170 },
 			{.health = 1800, .ammo_damage = 200 },
+		}
+	},
+	{
+		.id = 3,
+		.name = "Astroid",
+		.speed = 464,
+		.range = 1000,
+		.ammo = 12,
+		.ammo_r = 21,
+		.ammo_speed = 2169,
+		.reload_time = 0.96f,
+		.levels = {
+			{.health = 800, .ammo_damage = 165 },
+			{.health = 950, .ammo_damage = 180 },
+			{.health = 1150, .ammo_damage = 205 },
+		}
+	},
+	{
+		.id = 4,
+		.name = "Reuleaux Triangle",
+		.speed = 356,
+		.range = 500,
+		.ammo = 32,
+		.ammo_r = 34,
+		.ammo_speed = 1500,
+		.reload_time = 0.45f,
+		.levels = {
+			{.health = 1550, .ammo_damage = 120 },
+			{.health = 1750, .ammo_damage = 150 },
+			{.health = 2100, .ammo_damage = 175 },
 		}
 	}
 };
@@ -242,6 +275,7 @@ struct projectile {
 
 
 bool collision(map& map, int& new_x, int& new_y) {
+	if (new_x < 0 || new_y < 0) return false;
 	int corners_x[4] = { new_x - pl_width / 2, new_x + pl_width / 2 - 1, new_x - pl_width / 2, new_x + pl_width / 2 - 1 };
 	int corners_y[4] = { new_y - pl_width / 2, new_y - pl_width / 2, new_y + pl_width / 2 - 1, new_y + pl_width / 2 - 1 };
 
@@ -616,7 +650,7 @@ int main() {
 							players[i].ammo_now = players[i].shape.ammo;
 							players[i].health = shapes[shape_id].levels[level].health;
 							players[i].shape.ammo_damage = shapes[shape_id].levels[level].ammo_damage;
-							cout << "new shape loaded for player " << players[i].id << "with the shape id: " << shape_id << "level" << level << std::endl;
+							cout << "new shape loaded for player " << (int)players[i].id << " with the shape id: " << (int)shape_id << " level" <<(int)level << std::endl;
 							id_assign id_sent;
 							id_sent.id = i;
 							ENetPacket* packet = enet_packet_create(&id_sent, sizeof(id_assign), 0);
@@ -654,6 +688,8 @@ int main() {
 								pl_temp.id = i;
 								pl_temp.pos_x = current_map.pl_pos[i][1];
 								pl_temp.pos_y = current_map.pl_pos[i][0];
+								pl_temp.pos_f_x = current_map.pl_pos[i][1];
+								pl_temp.pos_f_y = current_map.pl_pos[i][0];
 								pl_temp.shape = shapes[0];
 								pl_temp.shape_level = 0;
 								pl_temp.ammo_now = pl_temp.shape.ammo;
@@ -710,7 +746,6 @@ int main() {
 				}
 				if ((connected_count == current_map.pl_nr) || (connect_anyway)) {
 					current_state = ServerState::MATCH_IN_PROGRESS;
-
 					MatchStatePacket state_pkt{ .new_state = static_cast<uint8_t>(ServerState::MATCH_IN_PROGRESS) };
 					ENetPacket* packet = enet_packet_create(&state_pkt, sizeof(MatchStatePacket), ENET_PACKET_FLAG_RELIABLE);
 					enet_host_broadcast(server, 0, packet);
@@ -719,6 +754,7 @@ int main() {
 				break;
 			}
 			case ServerState::MATCH_IN_PROGRESS: {
+
 				int connections = 0;
 				for (int i = 0; i < current_map.pl_nr; i++) {
 					if (players[i].connected) { 
@@ -731,6 +767,7 @@ int main() {
 					break;
 				}
 				simulation_pl_pr(current_map, players, projectiles, tick_time, projectile_ids);
+
 				int alive_count = 0;
 				int last_alive_id = 0;
 				for (int i = 0; i < current_map.pl_nr; i++) {
@@ -854,6 +891,8 @@ int main() {
 					pl_temp.id = i;
 					pl_temp.pos_x = current_map.pl_pos[i][1];
 					pl_temp.pos_y = current_map.pl_pos[i][0];
+					pl_temp.pos_f_x = current_map.pl_pos[i][1];
+					pl_temp.pos_f_y = current_map.pl_pos[i][0];
 					pl_temp.shape = shapes[0];
 					pl_temp.shape_level = 0;
 					pl_temp.ammo_now = pl_temp.shape.ammo;
