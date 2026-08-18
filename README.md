@@ -2,7 +2,7 @@
 A learning adventure for myself from which may come out a fast-paced multiplayer game where interesting geometrical shapes fight each other to dominate the world of maths.
 ## Game Demo & Technical Walkthrough
 
-[![Geomatrix Alpha Live Demo Video](https://img.youtube.com/vi/FMHLG_zqpoI/0.jpg)](https://youtu.be/FMHLG_zqpoI?si=HZ_pQRCz5DoegHpV)
+[![Geomatrix Alpha Live Demo Video](https://img.youtube.com/vi/vhor9vpG8vY/0.jpg)](https://youtu.be/vhor9vpG8vY)
 Watch the live demo of the game↑
 ---
 ## Built With
